@@ -1,3 +1,5 @@
+**Warning:** This project is pure vibes
+
 # Decompiled C++ Modernization Pipeline
 
 This toolchain transforms raw decompiled C++ code (specifically `acclient.c` and `acclient.h`) into clean, modern C++17+ code using an LLM-based pipeline. It handles dependency resolution, incremental processing, and structured code generation.
