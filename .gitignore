@@ -1,0 +1,8 @@
+mcp-sources/
+hallucinated/
+output/
+acclient.h
+acclient.c
+acclient.txt
+.venv
+__pycache__
