@@ -368,10 +368,40 @@ Referenced Types (for context):
         processed_code = self._clean_llm_output(processed_code)
 
         # ────────────────────────────────────────────────────────────────────────
-        # Verification Step
+        # Verification Step with retry logic
         # ────────────────────────────────────────────────────────────────────────
-        is_valid, reason = self.verify_logic(definition, processed_code)
+        is_valid = False
+        reason = ""
+        retry_count = 0
+        max_retries = 5
         
+        while not is_valid and retry_count < max_retries:
+            is_valid, reason = self.verify_logic(definition, processed_code)
+            
+            if not is_valid and retry_count < max_retries:
+                # Build a feedback prompt to improve the function based on the verification failure
+                feedback_prompt = f"""Original function:
+```cpp
+{definition}
+```
+
+Attempted modernization:
+```cpp
+{processed_code}
+```
+
+Verification feedback: {reason}
+
+Please regenerate the function addressing the issues mentioned in the verification feedback. Ensure that the logic remains identical while improving the code style and structure where possible.
+"""
+                
+                # Call the LLM again with the feedback
+                processed_code = self._call_llm(feedback_prompt)
+                if processed_code:
+                    processed_code = self._clean_llm_output(processed_code)
+                
+                retry_count += 1
+
         # Debug output
         if self.debug_dir and parent:
              # Use full parent name for debug path if possible
@@ -383,12 +413,12 @@ Referenced Types (for context):
              debug_dir = self.debug_dir / '/'.join(parts) / method_safe
              
              (debug_dir / "verification.txt").write_text(
-                 f"Equivalent: {is_valid}\nReason: {reason}",
+                 f"Equivalent: {is_valid}\nReason: {reason}\nRetries: {retry_count}",
                  encoding='utf-8'
              )
         
         if not is_valid:
-            processed_code = f"// VERIFICATION FAILED: {reason}\n{processed_code}"
+            processed_code = f"// VERIFICATION FAILED after {max_retries} attempts: {reason}\n{processed_code}"
 
         result = ProcessedFunction(
             name=name,
