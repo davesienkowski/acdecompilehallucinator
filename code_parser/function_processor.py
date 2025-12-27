@@ -38,16 +38,16 @@ class FunctionProcessor:
 Task: Modernize this decompiled C++ function to clean, idiomatic modern C++ (C++17+). Preserve ALL logic, and structure.
 
 STRICT RULES:
-- Output ONLY the function code, no explanations
+- Output ONLY the function code, no explanations, other classes, forward declarations, includes, etc.
 - Do not rename the function or parameters
 - Renaming local variables to improve readability is encouraged
-- Remove decompiler artifacts (__thiscall, explicit 'this' pointer, etc.)
+- Remove decompiler artifacts (__thiscall, explicit 'this' pointer, etc. )
 - Use modern types (uint32_t, bool instead of int for booleans)
 - Add comments to explain the logic / purpose of the function
 - Do not add or remove logic
 - Keep the function signature compatible with the class header
 - If you see enum values, use the enum name instead of the value
-- Do not make up constants that dont exist.
+- Do not make up constants that dont exist. 
 - Do your best to produce valid cpp code.
 
 Example Input:
@@ -370,6 +370,9 @@ Referenced Types (for context):
         # ────────────────────────────────────────────────────────────────────────
         # Verification Step with retry logic
         # ────────────────────────────────────────────────────────────────────────
+        import logging
+        logger = logging.getLogger(__name__)
+        
         is_valid = False
         reason = ""
         retry_count = 0
@@ -379,6 +382,9 @@ Referenced Types (for context):
             is_valid, reason = self.verify_logic(definition, processed_code)
             
             if not is_valid and retry_count < max_retries:
+                # Log the validation failure with retry count
+                logger.warning(f"Function {full_name} validation failed on attempt {retry_count + 1}/{max_retries}: {reason}")
+                
                 # Build a feedback prompt to improve the function based on the verification failure
                 feedback_prompt = f"""Original function:
 ```cpp
@@ -401,6 +407,13 @@ Please regenerate the function addressing the issues mentioned in the verificati
                     processed_code = self._clean_llm_output(processed_code)
                 
                 retry_count += 1
+            else:
+                # Log the successful validation
+                if is_valid:
+                    if retry_count == 0:
+                        logger.info(f"Function {full_name} validation successful on first attempt")
+                    else:
+                        logger.info(f"Function {full_name} validation successful after {retry_count} retries")
 
         # Debug output
         if self.debug_dir and parent:
