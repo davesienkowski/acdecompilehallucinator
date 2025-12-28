@@ -4,10 +4,13 @@ Class Header Generator
 Generates modernized C++ header files for classes, combining struct definitions
 with method signatures, using LLM processing.
 """
-import re
 import json
+import logging
+import re
 from typing import List, Dict, Optional, Set, Any
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class ClassHeaderGenerator:

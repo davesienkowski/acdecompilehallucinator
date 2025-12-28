@@ -20,9 +20,8 @@ Usage:
 import argparse
 import json
 import logging
-import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 from tqdm import tqdm
 
 from code_parser import (

@@ -245,27 +245,6 @@ class DatabaseHandler:
             
             conn.commit()
 
-    def get_all_types(self):
-        """Retrieve all stored types from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types ORDER BY type, name')
-            return cursor.fetchall()
-    
-    def get_enums(self):
-        """Retrieve all stored enums from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types WHERE type = "enum" ORDER BY name')
-            return cursor.fetchall()
-    
-    def get_structs(self):
-        """Retrieve all stored structs from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types WHERE type = "struct" ORDER BY name')
-            return cursor.fetchall()
-    
     def get_methods(self):
         """Retrieve all stored methods from the database"""
         with sqlite3.connect(self.db_path) as conn:

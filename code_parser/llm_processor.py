@@ -21,7 +21,7 @@ from code_parser import (
     LLMCache, LLMClient
 )
 from code_parser.class_assembler import ProcessedMethod
-from code_parser.llm_client import LM_STUDIO_URL, MAX_LLM_TOKENS
+from code_parser.llm_client import LM_STUDIO_URL
 
 
 def clean_llm_output(text: str) -> str:

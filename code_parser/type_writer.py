@@ -1,11 +1,14 @@
+"""
+Type Writer - Manages output of parsed types to files and database.
+"""
 import shutil
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List
+
 from .struct import Struct
 from .enum import Enum
 from .method import Method
 from .db_handler import DatabaseHandler
-from .offset_mapper import OffsetMapper
 
 
 class TypeWriter:

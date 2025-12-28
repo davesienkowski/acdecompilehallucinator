@@ -4,10 +4,13 @@ Function Processor
 Processes individual functions/methods through the LLM pipeline,
 resolving type references and storing processed output.
 """
+import logging
 import re
 from typing import List, Dict, Optional, Set, Tuple
 from pathlib import Path
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
