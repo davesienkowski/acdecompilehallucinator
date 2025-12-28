@@ -229,7 +229,8 @@ Return ONLY this JSON object:
 """
     
     def __init__(self, db_handler, llm_client=None, debug_dir: Optional[Path] = None,
-                 project_root: Optional[Path] = None, use_skills: bool = True):
+                 project_root: Optional[Path] = None, use_skills: bool = True,
+                 context_builder=None):
         """
         Initialize the function processor.
 
@@ -239,12 +240,15 @@ Return ONLY this JSON object:
             debug_dir: Optional directory for debug output
             project_root: Optional project root for skill loading
             use_skills: Whether to load and use skill instructions (default True)
+            context_builder: Optional ContextBuilder instance for unified context
+                gathering. If provided, can be used instead of internal methods.
         """
         self.db = db_handler
         self.llm = llm_client
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.dependency_analyzer = None  # Set externally if needed
         self.use_skills = use_skills
+        self.context_builder = context_builder
 
         # Load skill instructions for prompt enhancement (if enabled)
         if use_skills:

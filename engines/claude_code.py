@@ -10,6 +10,11 @@ The engine can operate in two modes:
 
 Skills are loaded from .claude/skills/ and provide structured
 prompts for specific tasks like header generation and method modernization.
+
+Key features:
+- ContextBuilder integration for rich type/enum context
+- Verification with retry loop for quality assurance
+- Skill-based prompt construction
 """
 
 import json
@@ -17,7 +22,7 @@ import logging
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, TYPE_CHECKING
 
 from .base import (
     LLMEngine,
@@ -28,6 +33,9 @@ from .base import (
     EngineResponseError,
     VerificationResult,
 )
+
+if TYPE_CHECKING:
+    from code_parser.context_builder import ContextBuilder, ContextResult
 
 logger = logging.getLogger(__name__)
 
@@ -449,3 +457,227 @@ class ClaudeCodeEngine(LLMEngine):
         """String representation."""
         status = "available" if self.is_available() else "not available"
         return f"ClaudeCodeEngine({status})"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ContextBuilder Integration
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def set_context_builder(self, context_builder: 'ContextBuilder') -> None:
+        """Set the context builder for enhanced context gathering.
+
+        When a ContextBuilder is set, modernize_method_with_context()
+        can automatically gather type references, enum mappings, and
+        parent class context.
+
+        Args:
+            context_builder: The ContextBuilder instance to use.
+        """
+        self._context_builder = context_builder
+        logger.info("ContextBuilder attached to ClaudeCodeEngine")
+
+    def modernize_method_with_context(
+        self,
+        method_name: str,
+        parent_class: str,
+        raw_code: str,
+        namespace: Optional[str] = None,
+        context: Optional['ContextResult'] = None,
+    ) -> str:
+        """Modernize a method with rich context from ContextBuilder.
+
+        This enhanced version uses ContextBuilder to gather comprehensive
+        context including type references, enum mappings, and parent
+        class definitions.
+
+        Args:
+            method_name: The name of the method.
+            parent_class: The parent class name.
+            raw_code: The raw decompiled method code.
+            namespace: Optional namespace for the class.
+            context: Pre-gathered context, or None to gather automatically.
+
+        Returns:
+            The modernized method implementation.
+
+        Raises:
+            ValueError: If no ContextBuilder is set and context is None.
+        """
+        # Use provided context or gather it
+        if context is None:
+            if not hasattr(self, '_context_builder') or self._context_builder is None:
+                # Fall back to basic modernize_method
+                logger.warning(
+                    "No ContextBuilder set, falling back to basic modernize_method"
+                )
+                return self.modernize_method(method_name, parent_class, raw_code)
+
+            context = self._context_builder.gather_method_context(
+                code=raw_code,
+                parent_class=parent_class,
+                namespace=namespace,
+            )
+
+        # Build enhanced prompt with all context
+        prompt_parts = []
+
+        # Add skill instructions
+        if "modernize-method" in self.skills:
+            prompt_parts.append(self.skills["modernize-method"])
+
+        prompt_parts.append("# Context\n")
+
+        # Add parent class context
+        if context.parent_header:
+            status = "modernized" if context.parent_is_processed else "raw"
+            prompt_parts.append(
+                f"## Parent Class ({status})\n"
+                f"This method belongs to class: {parent_class}\n\n"
+                f"```cpp\n{context.parent_header}\n```\n"
+            )
+
+        # Add referenced types
+        if context.type_context_str:
+            prompt_parts.append(
+                f"## Referenced Types\n"
+                f"```cpp\n{context.type_context_str}\n```\n"
+            )
+
+        # Add enum value reference
+        if context.enum_context_str:
+            prompt_parts.append(
+                f"## {context.enum_context_str}\n\n"
+                "IMPORTANT: Replace ALL numeric literals that appear in the "
+                "enum reference above with their corresponding enum constants.\n"
+            )
+
+        # Add the raw code to modernize
+        prompt_parts.append(
+            f"## Raw Code to Modernize\n"
+            f"```cpp\n{raw_code}\n```\n"
+        )
+
+        prompt = "\n".join(prompt_parts)
+        return self.generate(prompt)
+
+    def modernize_method_with_verification(
+        self,
+        method_name: str,
+        parent_class: str,
+        raw_code: str,
+        namespace: Optional[str] = None,
+        context: Optional['ContextResult'] = None,
+        max_retries: int = 5,
+    ) -> tuple[str, VerificationResult]:
+        """Modernize a method with verification and retry loop.
+
+        This method implements the verification pattern from the legacy
+        FunctionProcessor, where the modernized code is verified for
+        logic equivalence and regenerated if verification fails.
+
+        Args:
+            method_name: The name of the method.
+            parent_class: The parent class name.
+            raw_code: The raw decompiled method code.
+            namespace: Optional namespace for the class.
+            context: Pre-gathered context, or None to gather automatically.
+            max_retries: Maximum number of regeneration attempts.
+
+        Returns:
+            Tuple of (modernized_code, final_verification_result).
+        """
+        # Initial generation
+        modernized = self.modernize_method_with_context(
+            method_name=method_name,
+            parent_class=parent_class,
+            raw_code=raw_code,
+            namespace=namespace,
+            context=context,
+        )
+
+        # Verification loop
+        retry_count = 0
+        verification = None
+
+        while retry_count < max_retries:
+            verification = self.verify_logic(raw_code, modernized)
+
+            if verification.is_equivalent:
+                if retry_count == 0:
+                    logger.info(
+                        f"Method {parent_class}::{method_name} verified on first attempt"
+                    )
+                else:
+                    logger.info(
+                        f"Method {parent_class}::{method_name} verified after "
+                        f"{retry_count} retries"
+                    )
+                return modernized, verification
+
+            # Verification failed - build feedback prompt
+            logger.warning(
+                f"Method {parent_class}::{method_name} verification failed "
+                f"(attempt {retry_count + 1}/{max_retries}): {verification.details}"
+            )
+
+            feedback_prompt = self._build_feedback_prompt(
+                raw_code=raw_code,
+                modernized_code=modernized,
+                verification_feedback=verification.details,
+            )
+
+            modernized = self.generate(feedback_prompt)
+            modernized = self._extract_code_block(modernized)
+            retry_count += 1
+
+        # Exhausted retries
+        logger.error(
+            f"Method {parent_class}::{method_name} failed verification after "
+            f"{max_retries} attempts"
+        )
+
+        # Return with failure marker
+        final_code = (
+            f"// VERIFICATION FAILED after {max_retries} attempts: "
+            f"{verification.details if verification else 'Unknown'}\n"
+            f"{modernized}"
+        )
+
+        return final_code, verification or VerificationResult(
+            is_equivalent=False,
+            confidence="LOW",
+            issues=["Exhausted retries"],
+            details="Maximum retry count exceeded",
+        )
+
+    def _build_feedback_prompt(
+        self,
+        raw_code: str,
+        modernized_code: str,
+        verification_feedback: str,
+    ) -> str:
+        """Build a feedback prompt for regeneration after verification failure.
+
+        Args:
+            raw_code: The original decompiled code.
+            modernized_code: The attempted modernization.
+            verification_feedback: The feedback from verification.
+
+        Returns:
+            Prompt for regenerating the code.
+        """
+        return f"""Original function:
+```cpp
+{raw_code}
+```
+
+Attempted modernization:
+```cpp
+{modernized_code}
+```
+
+Verification feedback: {verification_feedback}
+
+Please regenerate the function addressing the issues mentioned in the verification feedback.
+Ensure that the logic remains identical while improving the code style and structure where possible.
+
+Output ONLY the corrected function code, no explanations."""

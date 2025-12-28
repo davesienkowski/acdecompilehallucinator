@@ -28,7 +28,7 @@ from tqdm import tqdm
 from code_parser import (
     DatabaseHandler, DependencyAnalyzer,
     ClassHeaderGenerator, FunctionProcessor, ClassAssembler,
-    LLMCache
+    LLMCache, ContextBuilder
 )
 from code_parser.class_assembler import ProcessedMethod
 
@@ -147,6 +147,9 @@ class LLMProcessor:
         # Headers and methods processors (lazy-loaded with debug support)
         self._header_gen = None
         self._func_processor = None
+
+        # Context builder (shared between components for unified context)
+        self._context_builder = None
     
     def get_file_owner(self, type_name: str) -> str:
         """Find the top-level struct/class that owns this type's file."""
@@ -221,7 +224,31 @@ class LLMProcessor:
     def llm_client(self) -> LLMEngine:
         """Backward-compatible alias for engine property."""
         return self.engine
-    
+
+    @property
+    def context_builder(self) -> ContextBuilder:
+        """Get or create the shared ContextBuilder instance.
+
+        The ContextBuilder provides unified context gathering for both
+        the FunctionProcessor and ClaudeCodeEngine, including:
+        - Type reference extraction
+        - Enum value mapping
+        - Parent class context
+        - Constant annotation
+        """
+        if self._context_builder is None:
+            self._context_builder = ContextBuilder(
+                db=self.db,
+                output_dir=self.output_dir,
+            )
+            logger.debug("ContextBuilder initialized")
+
+            # If engine is Claude Code, attach the context builder
+            if hasattr(self._engine, 'set_context_builder'):
+                self._engine.set_context_builder(self._context_builder)
+
+        return self._context_builder
+
     @property
     def header_generator(self) -> ClassHeaderGenerator:
         """Lazy-load header generator with debug support"""
@@ -236,14 +263,15 @@ class LLMProcessor:
     
     @property
     def function_processor(self) -> FunctionProcessor:
-        """Lazy-load function processor with debug support"""
+        """Lazy-load function processor with debug support and context builder"""
         if self._func_processor is None:
             self._func_processor = FunctionProcessor(
                 self.db,
                 llm_client=self.llm_client if not self.dry_run else None,
                 debug_dir=self.debug_dir,
                 project_root=Path.cwd(),
-                use_skills=self.use_skills
+                use_skills=self.use_skills,
+                context_builder=self.context_builder
             )
         return self._func_processor
     

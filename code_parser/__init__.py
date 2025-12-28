@@ -17,6 +17,7 @@ from .constant_replacer import ConstantReplacer
 from .llm_cache import LLMCache
 from .type_resolver import TypeResolver
 from .skill_loader import SkillLoader, get_skill_loader
+from .context_builder import ContextBuilder, ContextResult, EnumValueMapping
 # NOTE: LLMClient and LLMProcessor have been removed.
 # Use engines.get_engine("lm-studio") or engines.get_engine("claude-code") instead.
 # The LLMProcessor class is now in llm_process.py (CLI entry point).
@@ -42,6 +43,7 @@ __all__ = [
     'FunctionProcessor', 'ClassAssembler', 'ConstantsParser',
     'ConstantReplacer', 'LLMCache', 'TypeResolver',
     'SkillLoader', 'get_skill_loader',
+    'ContextBuilder', 'ContextResult', 'EnumValueMapping',
     # Exceptions
     'ACDecompileError',
     'ParsingError', 'HeaderParsingError', 'SourceParsingError',
