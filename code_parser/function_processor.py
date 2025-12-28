@@ -400,8 +400,101 @@ Return ONLY this JSON object:
         
         return ""
 
+
+    def get_enum_value_context(self, method_code: str) -> str:
+        """Extract numeric literals and match to known enum values.
+
+        Scans the method code for numeric literals (decimal and hex) and
+        looks up matching enum values in the database. Returns a formatted
+        reference section to help the LLM replace magic numbers with enum constants.
+
+        Args:
+            method_code: The raw decompiled method code to analyze.
+
+        Returns:
+            A formatted string listing known enum values that match numeric
+            literals found in the code, or empty string if none found.
+        """
+        # Find all numeric literals in the code (decimal and hex)
+        hex_pattern = r'0[xX][0-9a-fA-F]+'
+        decimal_pattern = r'(?<![0-9a-fA-Zx])\d+(?![0-9a-fA-Zx])'
+
+        hex_matches = re.findall(hex_pattern, method_code)
+        decimal_matches = re.findall(decimal_pattern, method_code)
+
+        # Convert to integer values
+        values_to_check = set()
+        for hex_val in hex_matches:
+            try:
+                values_to_check.add(int(hex_val, 16))
+            except ValueError:
+                pass
+        for dec_val in decimal_matches:
+            try:
+                val = int(dec_val)
+                # Skip very common values that are likely not enums
+                if val not in (0, 1, 2, -1):
+                    values_to_check.add(val)
+            except ValueError:
+                pass
+
+        if not values_to_check:
+            return ''
+
+        # Look up enum values from the database
+        # Types table columns: id(0), type(1), name(2), namespace(3), parent(4), code(5), ...
+        enum_mappings = []
+
+        for enum_row in self.db.get_enums():
+            enum_name = enum_row[2]  # name column
+            enum_code = enum_row[5] if len(enum_row) > 5 else ''
+
+            if not enum_code:
+                continue
+
+            # Parse enum values from the definition
+            value_pattern = r'(\w+)\s*=\s*(0[xX][0-9a-fA-F]+|\d+)'
+            for match in re.finditer(value_pattern, enum_code):
+                const_name = match.group(1)
+                const_val_str = match.group(2)
+                try:
+                    if const_val_str.lower().startswith('0x'):
+                        const_val = int(const_val_str, 16)
+                    else:
+                        const_val = int(const_val_str)
+
+                    if const_val in values_to_check:
+                        enum_mappings.append({
+                            'enum': enum_name,
+                            'const': const_name,
+                            'value': const_val,
+                            'hex': hex(const_val) if const_val >= 10 else str(const_val)
+                        })
+                except ValueError:
+                    pass
+
+        if not enum_mappings:
+            return ''
+
+        # Format as reference section
+        lines = ['Enum Value Reference (use these instead of magic numbers):']
+
+        # Group by enum name
+        by_enum = {}
+        for mapping in enum_mappings:
+            enum = mapping['enum']
+            if enum not in by_enum:
+                by_enum[enum] = []
+            by_enum[enum].append(mapping)
+
+        for enum_name, mappings in sorted(by_enum.items()):
+            for m in sorted(mappings, key=lambda x: x['value']):
+                lines.append(f"  {m['value']} ({m['hex']}) -> {enum_name}::{m['const']}")
+
+        return '\n'.join(lines)
+
     def build_prompt(self, method_definition: str, parent_class: Optional[str],
-                     reference_context: str = "", analysis: str = "") -> str:
+                     reference_context: str = "", analysis: str = "", enum_context: str = "") -> str:
         """Build the LLM prompt for function modernization.
 
         Constructs a complete prompt including the method to modernize,
@@ -444,9 +537,16 @@ Parent Class Definition:
 Referenced Types (for context):
 {reference_context}
 """
-        
+
+        if enum_context:
+            prompt += f"""
+{enum_context}
+
+IMPORTANT: Replace ALL numeric literals that appear in the enum reference above with their corresponding enum constants. Use the fully qualified enum name (e.g., EnumName::CONSTANT).
+"""
+
         prompt += f"\n{self.FEW_SHOT_FUNCTION}"
-        
+
         return prompt
     
     
@@ -568,9 +668,12 @@ Referenced Types (for context):
         
         # Get context for referenced types
         context = self.get_reference_context(all_references)
-        
-        # Build prompt and call LLM - don't pass analysis text, just use extracted types
-        prompt = self.build_prompt(definition, parent, context, analysis=None)  # Don't pass analysis text, just use extracted types
+
+        # Get enum value context for magic number replacement
+        enum_context = self.get_enum_value_context(definition)
+
+        # Build prompt and call LLM - include enum context for magic number replacement
+        prompt = self.build_prompt(definition, parent, context, analysis=None, enum_context=enum_context)
         processed_code = self._call_llm(prompt)
         
         if not processed_code:
