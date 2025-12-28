@@ -1,9 +1,12 @@
+import logging
 import re
 from typing import List, Dict
 from .struct import Struct
 from .enum import Enum
 from .method import Method
 from .offset_mapper import OffsetMapper
+
+logger = logging.getLogger(__name__)
 
 class SourceParser:
     """Parses C++ source files and extracts globals / methods"""
@@ -66,9 +69,9 @@ class SourceParser:
                 pass
             
             i += 1
-        print("Found", found_funcs, "funcs")
-    
+        logger.info(f"Found {found_funcs} functions")
+
     def print_stats(self):
         """Print statistics about parsed types"""
-        print(f"Global Methods found: {self.stats['global_methods_found'] - self.stats['global_methods_ignored']} (ignored: {self.stats['global_methods_ignored']})")
-        print(f"Class Methods found: {self.stats['class_methods_found'] - self.stats['class_methods_ignored']} (ignored: {self.stats['class_methods_ignored']})")
+        logger.info(f"Global Methods found: {self.stats['global_methods_found'] - self.stats['global_methods_ignored']} (ignored: {self.stats['global_methods_ignored']})")
+        logger.info(f"Class Methods found: {self.stats['class_methods_found'] - self.stats['class_methods_ignored']} (ignored: {self.stats['class_methods_ignored']})")

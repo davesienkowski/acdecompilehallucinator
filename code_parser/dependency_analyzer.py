@@ -4,10 +4,13 @@ Dependency Analyzer
 Extracts type references from code, builds dependency graphs, and provides
 topological sorting for proper processing order.
 """
+import logging
 import re
 from typing import List, Set, Dict, Tuple, Optional
 from collections import defaultdict
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -363,14 +366,14 @@ class DependencyAnalyzer:
     def print_summary(self):
         """Print a summary of the dependency analysis"""
         stats = self.get_dependency_stats()
-        print(f"\n{'='*60}")
-        print("Dependency Analysis Summary")
-        print('='*60)
-        print(f"Total types: {stats['total_types']}")
-        print(f"Total dependency edges: {stats['total_dependencies']}")
-        print(f"Average dependencies per type: {stats['average_dependencies']:.2f}")
-        print(f"Max dependencies: {stats['max_dependencies']}")
-        print(f"Types with no dependencies: {stats['types_with_no_deps']}")
-        print(f"Circular dependency groups: {stats['circular_dependency_groups']}")
-        print(f"Types involved in cycles: {stats['types_in_cycles']}")
-        print('='*60 + "\n")
+        logger.info("=" * 60)
+        logger.info("Dependency Analysis Summary")
+        logger.info("=" * 60)
+        logger.info(f"Total types: {stats['total_types']}")
+        logger.info(f"Total dependency edges: {stats['total_dependencies']}")
+        logger.info(f"Average dependencies per type: {stats['average_dependencies']:.2f}")
+        logger.info(f"Max dependencies: {stats['max_dependencies']}")
+        logger.info(f"Types with no dependencies: {stats['types_with_no_deps']}")
+        logger.info(f"Circular dependency groups: {stats['circular_dependency_groups']}")
+        logger.info(f"Types involved in cycles: {stats['types_in_cycles']}")
+        logger.info("=" * 60)

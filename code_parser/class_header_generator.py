@@ -598,7 +598,7 @@ Referenced Types (for context only, do not redefine):
         class_info = self.gather_class_info(class_name)
         
         if not class_info.get('struct'):
-            print(f"Warning: No struct definition found for {class_name}")
+            logger.warning(f"No struct definition found for {class_name}")
             return None
         
         # Start with references found via regex patterns

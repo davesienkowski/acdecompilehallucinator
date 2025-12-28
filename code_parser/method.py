@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
 from typing import Optional, Dict, List
 from pathlib import Path
 from .constants import should_ignore_global_method, should_ignore_class_method, should_ignore_class
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -158,7 +161,7 @@ class Method:
             self.return_type = self.return_type + '*'
 
         if self.return_type == "":
-            print("Bad Return?", def_line)
+            logger.warning(f"Bad return type: {def_line}")
 
         self.full_name = self.name
 
@@ -184,7 +187,7 @@ class Method:
         func_buffer = []
         parts = line.split(' ')
         if len(parts) < 2:
-            print("Bad Len?", line)
+            logger.warning(f"Bad line format: {line}")
         else:
             self.offset = line.split(' ')[1].strip('()')
 

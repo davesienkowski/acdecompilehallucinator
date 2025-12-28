@@ -11,6 +11,9 @@ one at a time, with optional debug output.
 import json
 import logging
 import re
+
+# Module-level logger for consistent logging
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from tqdm import tqdm
@@ -84,7 +87,6 @@ class LLMProcessor:
         # Initialize cache (separate database)
         cache_path = self.db.db_path.parent / "llm_cache.db"
         self.cache = LLMCache(cache_path)
-        logger = logging.getLogger("llm-processor")
         logger.info(f"LLM Cache: {cache_path}")
         
         # Initialize components
@@ -196,7 +198,6 @@ class LLMProcessor:
         # Get enum from database
         enums = self.db.get_type_by_name(enum_name, 'enum')
         if not enums:
-            logger = logging.getLogger("llm-processor")
             logger.warning(f"Enum not found: {enum_name}")
             return None
         
@@ -204,7 +205,6 @@ class LLMProcessor:
         enum_code = enum_row[5] if len(enum_row) > 5 else ""
         
         if self.dry_run:
-            logger = logging.getLogger("llm-processor")
             logger.info(f"[DRY-RUN] Would copy enum: {enum_name}")
             
             # Create placeholder header file for enum in dry run mode
@@ -251,7 +251,6 @@ enum class {simple_name} {{
         # Check if already exists
         header_path = self.get_header_path(enum_name)
         if header_path.exists() and not self.force:
-            logger = logging.getLogger("llm-processor")
             logger.info(f"✓ Enum: {enum_name} (already exists, skipping)")
             return header_path
 
@@ -269,7 +268,6 @@ enum class {simple_name} {{
             namespace=namespace_write
         )
         if path:
-            logger = logging.getLogger("llm-processor")
             logger.info(f"✓ Enum: {enum_name} → {path.name}")
             if pbar:
                 pbar.update(1)
@@ -312,7 +310,6 @@ enum class {simple_name} {{
         if owner != class_name:
             if owner in self.processed_owners:
                 return {"header_path": None, "source_path": None, "method_count": 0}
-            logger = logging.getLogger("llm-processor")
             logger.info(f"Redirecting {class_name} to owner {owner}")
             return self.process_class(owner, pbar=pbar)
             
@@ -341,7 +338,6 @@ enum class {simple_name} {{
         
         if self.dry_run:
             methods = self.db.get_methods_by_parent(class_name)
-            logger = logging.getLogger("llm-processor")
             logger.info(f"[DRY-RUN] Would process: {class_name} ({len(methods)} methods)")
             
             # Create placeholder header and cpp files in dry run mode
@@ -476,7 +472,6 @@ void {simple_name_source}::{method_name}() {{
             
             return result
         
-        logger = logging.getLogger("llm-processor")
         logger.info(f"┌─ Processing: {class_name}")
 
         if self.force:
@@ -675,7 +670,6 @@ void {simple_name_source}::{method_name}() {{
         total_methods = 0
         processed_owners = set()
         
-        logger = logging.getLogger("llm-processor")
         logger.info("Calculating total work units...")
         
         for type_info in order:
@@ -756,12 +750,10 @@ void {simple_name_source}::{method_name}() {{
         # Filter if requested
         if filter_classes:
             order = [t for t in order if t["name"] in filter_classes]
-            logger = logging.getLogger("llm-processor")
             logger.info(f"Filtered to {len(order)} types: {[t['name'] for t in order]}")
         
         # Calculate work units for better progress estimation
         work_plan = self.calculate_work_units(order)
-        logger = logging.getLogger("llm-processor")
         logger.info(f"Plan: {work_plan['headers']} headers, {work_plan['methods']} methods to process.")
         
         if work_plan["total"] == 0:
@@ -807,7 +799,6 @@ void {simple_name_source}::{method_name}() {{
                     successful_times.append(elapsed)
                 
                 except Exception as e:
-                    logger = logging.getLogger("llm-processor")
                     logger.error(f"Failed to process {name}: {e}")
                     stats["errors"].append({"name": name, "error": str(e)})
                     
@@ -846,7 +837,6 @@ void {simple_name_source}::{method_name}() {{
         # unless filter_classes is provided
         
         if self.force and not filter_classes:
-            logger = logging.getLogger("llm-processor")
             logger.warning("Force flag ignored for bulk processing (safety check)")
             self.force = False
             
@@ -856,29 +846,29 @@ void {simple_name_source}::{method_name}() {{
     def show_plan(self):
         """Show what would be processed (dry-run mode)"""
         order = self.get_processing_order()
-        
-        print(f"\n{'='*60}")
-        print(f"Processing Plan - {len(order)} types")
-        print('='*60)
-        
+
+        logger.info("=" * 60)
+        logger.info(f"Processing Plan - {len(order)} types")
+        logger.info("=" * 60)
+
         enum_count = sum(1 for t in order if t["kind"] == "enum")
         struct_count = len(order) - enum_count
-        
-        print(f"Enums:   {enum_count}")
-        print(f"Structs: {struct_count}")
-        print('-'*60)
-        
+
+        logger.info(f"Enums:   {enum_count}")
+        logger.info(f"Structs: {struct_count}")
+        logger.info("-" * 60)
+
         for i, type_info in enumerate(order[:20], 1):
             name = type_info["name"]
             kind = type_info["kind"]
-            
+
             if kind == "enum":
-                print(f"{i:3}. [ENUM] {name}")
+                logger.info(f"{i:3}. [ENUM] {name}")
             else:
                 methods = self.db.get_methods_by_parent(name)
-                print(f"{i:3}. [STRUCT] {name} ({len(methods)} methods)")
-        
+                logger.info(f"{i:3}. [STRUCT] {name} ({len(methods)} methods)")
+
         if len(order) > 20:
-            print(f"... and {len(order) - 20} more types")
-        
-        print('='*60 + "\n")
+            logger.info(f"... and {len(order) - 20} more types")
+
+        logger.info("=" * 60)

@@ -17,10 +17,39 @@ from .constant_replacer import ConstantReplacer
 from .llm_cache import LLMCache
 from .llm_client import LLMClient
 from .llm_processor import LLMProcessor
+from .exceptions import (
+    ACDecompileError,
+    ParsingError, HeaderParsingError, SourceParsingError,
+    MethodSignatureError, EncodingError, InvalidStructureError,
+    DatabaseError, DatabaseConnectionError, DatabaseQueryError,
+    DatabaseConstraintError, DatabaseMigrationError,
+    LLMError, LLMConnectionError, LLMResponseError,
+    LLMProcessingError, LLMVerificationError, LLMCacheError,
+    FileIOError, FileNotFoundError, FileWriteError,
+    FileEncodingError, PathError,
+    ConfigurationError, MissingConfigurationError,
+    InvalidConfigurationError, DependencyMissingError,
+    ProcessingError, DependencyResolutionError,
+    TypeResolutionError, CodeGenerationError, ValidationError
+)
 
 __all__ = [
     'HeaderParser', 'TypeWriter', 'Struct', 'Enum', 'Method',
     'DatabaseHandler', 'DependencyAnalyzer', 'ClassHeaderGenerator',
     'FunctionProcessor', 'ClassAssembler', 'ConstantsParser',
-    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor'
+    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor',
+    # Exceptions
+    'ACDecompileError',
+    'ParsingError', 'HeaderParsingError', 'SourceParsingError',
+    'MethodSignatureError', 'EncodingError', 'InvalidStructureError',
+    'DatabaseError', 'DatabaseConnectionError', 'DatabaseQueryError',
+    'DatabaseConstraintError', 'DatabaseMigrationError',
+    'LLMError', 'LLMConnectionError', 'LLMResponseError',
+    'LLMProcessingError', 'LLMVerificationError', 'LLMCacheError',
+    'FileIOError', 'FileNotFoundError', 'FileWriteError',
+    'FileEncodingError', 'PathError',
+    'ConfigurationError', 'MissingConfigurationError',
+    'InvalidConfigurationError', 'DependencyMissingError',
+    'ProcessingError', 'DependencyResolutionError',
+    'TypeResolutionError', 'CodeGenerationError', 'ValidationError'
 ]

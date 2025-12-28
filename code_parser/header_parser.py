@@ -1,7 +1,10 @@
+import logging
 import re
 from typing import List, Dict
 from .struct import Struct
 from .enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class HeaderParser:
@@ -83,7 +86,7 @@ class HeaderParser:
                         if e.is_ignored:
                             self.stats['enums_ignored'] += 1
                     else:
-                        print("Could not parse enum?", def_line)
+                        logger.warning(f"Could not parse enum: {def_line}")
                 elif def_line.startswith("struct "):
                     s = Struct()
                     (i, struct_name, struct) = s.parse_struct(def_line, lines, i)
@@ -93,7 +96,7 @@ class HeaderParser:
                         if s.is_ignored:
                             self.stats['structs_ignored'] += 1
                     else:
-                        print("Could not parse struct?", def_line)
+                        logger.warning(f"Could not parse struct: {def_line}")
                 elif def_line.startswith("typedef "):
                     i = self.parse_typedef(def_line, lines, i)
                 elif def_line.startswith("union "):
@@ -103,14 +106,14 @@ class HeaderParser:
                     if i < len(lines):  # Include the closing };
                         i += 1
                 else:
-                    print(f"Unmatched: {def_line}")
+                    logger.debug(f"Unmatched: {def_line}")
             else:
-                print("Failed to match:", line)
+                logger.debug(f"Failed to match: {line}")
             i += 1
     
     def print_stats(self):
         """Print statistics about parsed types"""
-        print(f"Structs found: {self.stats['structs_found'] - self.stats['structs_ignored']} (ignored: {self.stats['structs_ignored']})")
-        print(f"Enums found: {self.stats['enums_found'] - self.stats['enums_ignored']} (ignored: {self.stats['enums_ignored']})")
-        print(f"Typedefs found: {self.stats['typedefs_found']}")
-        print(f"Unions found: {self.stats['unions_found']} (ignored: {self.stats['unions_ignored']})")
+        logger.info(f"Structs found: {self.stats['structs_found'] - self.stats['structs_ignored']} (ignored: {self.stats['structs_ignored']})")
+        logger.info(f"Enums found: {self.stats['enums_found'] - self.stats['enums_ignored']} (ignored: {self.stats['enums_ignored']})")
+        logger.info(f"Typedefs found: {self.stats['typedefs_found']}")
+        logger.info(f"Unions found: {self.stats['unions_found']} (ignored: {self.stats['unions_ignored']})")
