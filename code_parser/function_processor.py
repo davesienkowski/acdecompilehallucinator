@@ -10,6 +10,8 @@ from typing import List, Dict, Optional, Set, Tuple
 from pathlib import Path
 from dataclasses import dataclass
 
+from .skill_loader import SkillLoader, get_skill_loader
+
 logger = logging.getLogger(__name__)
 
 
@@ -226,19 +228,25 @@ Return ONLY this JSON object:
 }}
 """
     
-    def __init__(self, db_handler, llm_client=None, debug_dir: Optional[Path] = None):
+    def __init__(self, db_handler, llm_client=None, debug_dir: Optional[Path] = None,
+                 project_root: Optional[Path] = None):
         """
         Initialize the function processor.
-        
+
         Args:
             db_handler: DatabaseHandler instance for type lookups
             llm_client: Optional LLM client for processing
             debug_dir: Optional directory for debug output
+            project_root: Optional project root for skill loading
         """
         self.db = db_handler
         self.llm = llm_client
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.dependency_analyzer = None  # Set externally if needed
+
+        # Load skill instructions for prompt enhancement
+        self.skill_loader = get_skill_loader(project_root)
+        self._skill_instructions = self._load_skill_instructions()
         
         # Patterns for extracting types from function code
         self.type_patterns = [
@@ -266,7 +274,33 @@ Return ONLY this JSON object:
             'BYTE', 'WORD', 'DWORD', 'QWORD', 'BOOL', 'HANDLE', 'HRESULT',
             'TRUE', 'FALSE', 'NULL', 'nullptr', 'String', 'Vector',
         }
-        
+
+    def _load_skill_instructions(self) -> str:
+        """Load skill instructions for prompt enhancement.
+
+        Extracts key instructions from skill files that apply to function
+        modernization. This allows both Claude Code and LM Studio engines
+        to benefit from the same guidance.
+
+        Returns:
+            Formatted skill instructions string for prompt injection.
+        """
+        instructions = []
+
+        # Load enum replacement instructions
+        enum_instructions = self.skill_loader.get_enum_instructions()
+        if enum_instructions:
+            instructions.append(enum_instructions)
+
+        # Load transformation rules
+        rules = self.skill_loader.get_transformation_rules()
+        if rules:
+            instructions.append(rules)
+
+        if instructions:
+            return '\n\n'.join(instructions)
+        return ""
+
     def _write_debug(self, method_name: str, parent_class: str, prompt: str, response: str):
         """Write debug files for function"""
         if not self.debug_dir:
@@ -543,6 +577,12 @@ Referenced Types (for context):
 {enum_context}
 
 IMPORTANT: Replace ALL numeric literals that appear in the enum reference above with their corresponding enum constants. Use the fully qualified enum name (e.g., EnumName::CONSTANT).
+"""
+
+        # Add skill-based instructions (loaded from .claude/skills/)
+        if self._skill_instructions:
+            prompt += f"""
+{self._skill_instructions}
 """
 
         prompt += f"\n{self.FEW_SHOT_FUNCTION}"
