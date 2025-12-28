@@ -460,6 +460,11 @@ Skills will be developed after the engine abstraction is complete.
 - [ ] Implement proper exception hierarchy
 - [ ] Add structured logging
 - [ ] Write unit tests for critical paths
+- [ ] **Programmatic type extraction** (separate PR):
+  - [ ] Extract enums from database instead of LLM guessing
+  - [ ] Extract globals/constants programmatically
+  - [ ] Improve type reference resolution using parsed data
+  - [ ] Reduce AI dependency for deterministic lookups
 
 ### Phase 3: Claude Code Engine
 
