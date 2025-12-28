@@ -454,7 +454,8 @@ Please regenerate the function addressing the issues mentioned in the verificati
             method.definition = definition
             method.offset = offset
             
-            self.db.store_processed_method(method, processed_code, list(references))
+            engine_name = self.llm.name if self.llm and hasattr(self.llm, 'name') else "lm-studio"
+            self.db.store_processed_method(method, processed_code, list(references), engine_used=engine_name)
         
         return result
     

@@ -96,6 +96,18 @@ class DatabaseHandler:
             except sqlite3.OperationalError:
                 pass  # Already exists
             
+            # Migration: Add engine_used column to processed_types (defaults to lm-studio for legacy)
+            try:
+                cursor.execute("ALTER TABLE processed_types ADD COLUMN engine_used TEXT DEFAULT 'lm-studio'")
+            except sqlite3.OperationalError:
+                pass  # Already exists
+            
+            # Migration: Add engine_used column to processed_methods (defaults to lm-studio for legacy)
+            try:
+                cursor.execute("ALTER TABLE processed_methods ADD COLUMN engine_used TEXT DEFAULT 'lm-studio'")
+            except sqlite3.OperationalError:
+                pass  # Already exists
+            
             # Create constants table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS constants (
@@ -323,8 +335,19 @@ class DatabaseHandler:
     
     def store_processed_type(self, name: str, type_kind: str, original_code: str,
                              processed_header: str, processed_source: str = None,
-                             dependencies: List[str] = None):
-        """Store a processed type in the database"""
+                             dependencies: List[str] = None,
+                             engine_used: str = "lm-studio"):
+        """Store a processed type in the database.
+        
+        Args:
+            name: Fully qualified type name
+            type_kind: Type kind (struct, enum, etc.)
+            original_code: Original decompiled code
+            processed_header: Modernized header code
+            processed_source: Modernized source code (optional)
+            dependencies: List of type dependencies
+            engine_used: Name of LLM engine that processed this type
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             deps_json = json.dumps(dependencies) if dependencies else None
@@ -332,10 +355,10 @@ class DatabaseHandler:
             cursor.execute('''
                 INSERT OR REPLACE INTO processed_types 
                 (name, type, original_code, processed_header, processed_source, 
-                 dependencies, is_processed, processed_at)
-                VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                 dependencies, is_processed, processed_at, engine_used)
+                VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
             ''', (name, type_kind, original_code, processed_header, 
-                  processed_source, deps_json))
+                  processed_source, deps_json, engine_used))
             conn.commit()
 
     def get_processed_type(self, name: str) -> Optional[Dict[str, Any]]:
@@ -405,8 +428,16 @@ class DatabaseHandler:
     # ───────────────────────────────────────────────────────────────────────
     
     def store_processed_method(self, method: Method, processed_code: str,
-                               dependencies: List[str] = None):
-        """Store a processed method in the database"""
+                               dependencies: List[str] = None,
+                               engine_used: str = "lm-studio"):
+        """Store a processed method in the database.
+        
+        Args:
+            method: Method dataclass with metadata
+            processed_code: Modernized method code
+            dependencies: List of type dependencies
+            engine_used: Name of LLM engine that processed this method
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             deps_json = json.dumps(dependencies) if dependencies else None
@@ -419,10 +450,10 @@ class DatabaseHandler:
             cursor.execute('''
                 INSERT OR REPLACE INTO processed_methods 
                 (name, full_name, parent_class, original_code, processed_code,
-                 dependencies, offset, is_processed, processed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                 dependencies, offset, is_processed, processed_at, engine_used)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
             ''', (method.name, method.full_name, parent_name,
-                  method.definition, processed_code, deps_json, method.offset))
+                  method.definition, processed_code, deps_json, method.offset, engine_used))
             conn.commit()
 
     def get_processed_method(self, full_name: str) -> Optional[Dict[str, Any]]:

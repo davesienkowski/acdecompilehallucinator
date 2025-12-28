@@ -445,13 +445,13 @@ Skills will be developed after the engine abstraction is complete.
 - [x] Create LM Studio engine wrapper
 - [x] Update llm_process.py with --engine CLI flag
 
-### Phase 1: Engine Integration (Next)
+### Phase 1: Engine Integration (Complete)
 
 - [x] Extract LM Studio logic into `engines/lm_studio.py`
 - [x] Update `llm_process.py` with `--engine` flag
-- [ ] Verify LM Studio engine produces identical output
-- [ ] Add engine tracking to `processed_*` tables
-- [ ] Ensure backward compatibility with existing database
+- [x] Verify LM Studio engine produces identical output
+- [x] Add engine tracking to `processed_*` tables (engine_used column)
+- [x] Ensure backward compatibility with existing database (migration with defaults)
 
 ### Phase 2: Legacy Refactoring (Parallel)
 

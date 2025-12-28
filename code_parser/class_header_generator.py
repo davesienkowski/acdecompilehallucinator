@@ -519,12 +519,14 @@ Referenced Types (for context only, do not redefine):
         if header and save_to_db:
             struct = class_info['struct']
             original_code = struct[5] if struct and len(struct) > 5 else ""
+            engine_name = self.llm.name if self.llm and hasattr(self.llm, 'name') else "lm-studio"
             self.db.store_processed_type(
                 name=class_name,
                 type_kind='struct',
                 original_code=original_code,
                 processed_header=header,
-                dependencies=list(all_references)
+                dependencies=list(all_references),
+                engine_used=engine_name
             )
         
         return header
