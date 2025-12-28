@@ -107,13 +107,15 @@ class Method:
         elif self.parent:
             # Use parent class name for the file, not the full method name
             # Clean the parent name to make it filesystem-safe
-            safe_parent = self.parent.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+            safe_parent = self.parent.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
             # Truncate if too long
             if len(safe_parent) > 100:
                 safe_parent = safe_parent[:100]
             
             if self.namespace:
-                namespace_dir = src_path / self.namespace.split('::')[0]
+                # Sanitize namespace for Windows filesystem
+                safe_ns = self.namespace.split('::')[0].replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
+                namespace_dir = src_path / safe_ns
                 namespace_dir.mkdir(exist_ok=True)
                 out_file = namespace_dir / f"{safe_parent}.cpp"
             else:
@@ -124,17 +126,19 @@ class Method:
                 out_file = src_path / f"{self.safe_name.split('__')[0]}.cpp"
             else:
                 # Clean namespace for filename
-                safe_namespace = self.namespace.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+                safe_namespace = self.namespace.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
                 # Truncate if too long
                 if len(safe_namespace) > 10:
                     safe_namespace = safe_namespace[:100]
                     
-                namespace_dir = src_path / self.namespace.split('::')[0]
+                # Sanitize namespace directory for Windows filesystem
+                safe_ns_dir = self.namespace.split('::')[0].replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
+                namespace_dir = src_path / safe_ns_dir
                 namespace_dir.mkdir(exist_ok=True)
                 out_file = namespace_dir / f"{safe_namespace}.cpp"
         else:
             # For global functions, use safe_name but truncate if needed
-            safe_name = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+            safe_name = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
             if len(safe_name) > 100:
                 safe_name = safe_name[:100]
             out_file = src_path / f"{safe_name}.cpp"

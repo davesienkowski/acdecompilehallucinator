@@ -140,7 +140,7 @@ class Struct:
             Path object pointing to the output .cpp file location.
         """
         # Clean the safe_name to handle template instantiations that result in very long names
-        safe_name_clean = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+        safe_name_clean = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
         if len(safe_name_clean) > 100:
             safe_name_clean = safe_name_clean[:100]
 
@@ -149,7 +149,9 @@ class Struct:
             if structs_dict and self.namespace in structs_dict:
                 out_file = src_path / f"{safe_name_clean.split('__')[0]}.cpp"
             else:
-                namespace_dir = src_path / self.namespace.split('::')[0]
+                # Sanitize namespace for Windows filesystem
+                safe_namespace = self.namespace.split('::')[0].replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('|', '_')
+                namespace_dir = src_path / safe_namespace
                 namespace_dir.mkdir(exist_ok=True)
                 out_file = namespace_dir / f"{safe_name_clean.split('__')[-1]}.cpp"
         else:

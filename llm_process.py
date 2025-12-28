@@ -51,57 +51,9 @@ logging.basicConfig(
 logger = logging.getLogger("llm-processor")
 
 
-# ────────────────────────────────────────────────────────────────────────────────
-# LLM Client Wrapper
-# ────────────────────────────────────────────────────────────────────────────────
-class LLMClient:
-    """Simple LLM client using OpenAI-compatible API (e.g., LMStudio)"""
-    
-    def __init__(self, base_url: str = LM_STUDIO_URL, temperature: float = 0.2, cache: Optional[LLMCache] = None):
-        try:
-            from openai import OpenAI
-            self.client = OpenAI(base_url=base_url, api_key="lm-studio")
-            self.temperature = temperature
-            self.cache = cache
-        except ImportError:
-            raise ImportError("Please install openai: pip install openai")
-    
-    def generate(self, prompt: str, max_tokens: int = MAX_LLM_TOKENS) -> str:
-        """Generate response from LLM, checking cache first"""
-        # Check cache
-        if self.cache:
-            cached = self.cache.get(prompt)
-            if cached:
-                logger.info("Cache hit! Using stored response.")
-                return cached
-
-        response = self.client.chat.completions.create(
-            model="local-model",
-            messages=[
-                {"role": "system", "content": "You are a C++ modernization expert. Output ONLY clean code, no explanations."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=self.temperature,
-            max_tokens=max_tokens,
-            timeout=300
-        )
-        
-        result = response.choices[0].message.content or ""
-
-        # Store in cache
-        if self.cache and result:
-            self.cache.set(prompt, result)
-        
-        # Log token usage
-        if hasattr(response, 'usage'):
-            u = response.usage
-            logger.debug(f"Tokens: {u.prompt_tokens}↑ + {u.completion_tokens}↓ = {u.total_tokens}")
-        
-        return result
-    
-    def __call__(self, prompt: str) -> str:
-        """Allow using client as callable"""
-        return self.generate(prompt)
+# NOTE: The legacy LLMClient class has been replaced by the engine abstraction.
+# Use engines.get_engine("lm-studio") or engines.get_engine("claude-code") instead.
+# See engines/ module for implementation details.
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -725,8 +677,11 @@ Examples:
     # Process all types (default engine: {DEFAULT_ENGINE})
     python llm_process.py --db mcp-sources/types.db --output ./output
 
-    # Process with specific engine
-    python llm_process.py --engine lm-studio --db mcp-sources/types.db
+    # Process with Claude Code engine (uses skills from .claude/skills/)
+    python llm_process.py --engine claude-code --db mcp-sources/types.db
+
+    # Process with LM Studio (local LLM via OpenAI-compatible API)
+    python llm_process.py --engine lm-studio --lm-studio-url http://localhost:1234/v1
 
     # Process single class with debug output
     python llm_process.py --class AllegianceProfile --debug
@@ -735,6 +690,10 @@ Examples:
     python llm_process.py --dry-run
 
 Available engines: {', '.join(list_engines())}
+
+Engine details:
+  lm-studio:   Local LLM via OpenAI-compatible API (requires LM Studio running)
+  claude-code: Claude Code CLI with skills integration (requires 'claude' CLI)
         """
     )
 
@@ -780,13 +739,23 @@ Available engines: {', '.join(list_engines())}
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output: {debug_dir}")
 
-    # Build engine configuration
+    # Build engine configuration based on selected engine
+    extra_config = {}
+    if args.engine == "lm-studio":
+        extra_config = {
+            "base_url": args.lm_studio_url,
+            "model": "local-model",
+        }
+    elif args.engine == "claude-code":
+        extra_config = {
+            "project_root": str(args.output.parent),  # Use parent of output as project root
+            "cli_timeout": 600,  # 10 minutes for complex operations
+        }
+
     engine_config = EngineConfig(
         temperature=args.temperature,
         max_tokens=MAX_LLM_TOKENS,
-        extra={
-            "base_url": args.lm_studio_url,
-        }
+        extra=extra_config
     )
 
     # Create processor with engine configuration
