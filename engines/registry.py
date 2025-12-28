@@ -146,12 +146,12 @@ def _auto_register() -> None:
     except ImportError as e:
         logger.debug(f"LM Studio engine not available: {e}")
 
-    # Future engines can be registered here
-    # try:
-    #     from .claude_code import ClaudeCodeEngine
-    #     register_engine("claude-code", ClaudeCodeEngine)
-    # except ImportError as e:
-    #     logger.debug(f"Claude Code engine not available: {e}")
+    # Claude Code engine
+    try:
+        from .claude_code import ClaudeCodeEngine
+        register_engine("claude-code", ClaudeCodeEngine)
+    except ImportError as e:
+        logger.debug(f"Claude Code engine not available: {e}")
 
 
 # Auto-register engines on module import
