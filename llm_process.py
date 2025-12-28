@@ -32,10 +32,14 @@ from code_parser import (
 )
 from code_parser.class_assembler import ProcessedMethod
 
+# Engine abstraction layer
+from engines import get_engine, list_engines, EngineConfig, LLMEngine
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ────────────────────────────────────────────────────────────────────────────────
+DEFAULT_ENGINE = "lm-studio"
 LM_STUDIO_URL = "http://localhost:1234/v1"
 MAX_LLM_TOKENS = 131072
 
@@ -143,18 +147,25 @@ class LLMProcessor:
     one at a time, with optional debug output.
     """
     
-    def __init__(self, db_path: Path, output_dir: Path, 
+    def __init__(self, db_path: Path, output_dir: Path,
                  debug_dir: Optional[Path] = None,
                  dry_run: bool = False,
-                 force: bool = False):
+                 force: bool = False,
+                 engine: Optional[LLMEngine] = None,
+                 engine_name: str = DEFAULT_ENGINE,
+                 engine_config: Optional[EngineConfig] = None):
         """
         Initialize the processor.
-        
+
         Args:
             db_path: Path to types.db database
             output_dir: Output directory for generated files
             debug_dir: Optional directory for debug output
             dry_run: If True, don't call LLM or write files
+            force: If True, reprocess even if already done
+            engine: Pre-configured LLM engine instance (optional)
+            engine_name: Name of engine to use if no engine provided
+            engine_config: Configuration for engine if no engine provided
         """
         self.db = DatabaseHandler(str(db_path))
         self.output_dir = Path(output_dir)
@@ -162,19 +173,21 @@ class LLMProcessor:
         self.dry_run = dry_run
         self.force = force
         self.processed_owners = set()
-        
+
         # Initialize cache (separate database)
         cache_path = self.db.db_path.parent / "llm_cache.db"
         self.cache = LLMCache(cache_path)
         logger.info(f"LLM Cache: {cache_path}")
-        
+
         # Initialize components
         self.analyzer = DependencyAnalyzer(self.db)
         self.assembler = ClassAssembler(self.output_dir)
-        
-        # LLM client (lazy-loaded)
-        self._llm_client = None
-        
+
+        # Engine configuration
+        self._engine = engine
+        self._engine_name = engine_name
+        self._engine_config = engine_config
+
         # Headers and methods processors (lazy-loaded with debug support)
         self._header_gen = None
         self._func_processor = None
@@ -227,11 +240,31 @@ class LLMProcessor:
         return self.output_dir / "src" / f"{simple_name}.cpp"
 
     @property
-    def llm_client(self) -> LLMClient:
-        """Lazy-load LLM client"""
-        if self._llm_client is None:
-            self._llm_client = LLMClient(cache=self.cache)
-        return self._llm_client
+    def engine(self) -> LLMEngine:
+        """Lazy-load LLM engine.
+
+        Uses the engine abstraction layer for all LLM operations.
+        The engine is configured via constructor parameters.
+        """
+        if self._engine is None:
+            # Build engine config if not provided
+            config = self._engine_config
+            if config is None:
+                config = EngineConfig(
+                    temperature=0.2,
+                    max_tokens=MAX_LLM_TOKENS,
+                    extra={"base_url": LM_STUDIO_URL}
+                )
+
+            self._engine = get_engine(self._engine_name, config=config, cache=self.cache)
+            logger.info(f"Using engine: {self._engine.name}")
+
+        return self._engine
+
+    @property
+    def llm_client(self) -> LLMEngine:
+        """Backward-compatible alias for engine property."""
+        return self.engine
     
     @property
     def header_generator(self) -> ClassHeaderGenerator:
@@ -687,23 +720,34 @@ def main():
     parser = argparse.ArgumentParser(
         description="Process decompiled C++ through LLM in dependency order",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
-    # Process all types
+    # Process all types (default engine: {DEFAULT_ENGINE})
     python llm_process.py --db mcp-sources/types.db --output ./output
-    
+
+    # Process with specific engine
+    python llm_process.py --engine lm-studio --db mcp-sources/types.db
+
     # Process single class with debug output
     python llm_process.py --class AllegianceProfile --debug
-    
+
     # Show processing plan (dry-run)
     python llm_process.py --dry-run
+
+Available engines: {', '.join(list_engines())}
         """
     )
-    
+
     parser.add_argument("--db", type=Path, default=Path("mcp-sources/types.db"),
         help="Path to types.db database")
     parser.add_argument("--output", type=Path, default=Path("./output"),
         help="Output directory for generated files")
+    parser.add_argument("--engine", type=str, choices=list_engines(), default=DEFAULT_ENGINE,
+        help=f"LLM engine to use (default: {DEFAULT_ENGINE})")
+    parser.add_argument("--lm-studio-url", type=str, default=LM_STUDIO_URL,
+        help=f"LM Studio API URL (default: {LM_STUDIO_URL})")
+    parser.add_argument("--temperature", type=float, default=0.2,
+        help="LLM temperature for generation (default: 0.2)")
     parser.add_argument("--debug", action="store_true",
         help="Enable debug output (prompts, responses, types)")
     parser.add_argument("--debug-dir", type=Path, default=None,
@@ -716,7 +760,7 @@ Examples:
         help="Force re-processing (clears previous results for this class)")
     parser.add_argument("--verbose", "-v", action="store_true",
         help="Enable verbose logging")
-    
+
     args = parser.parse_args()
     
     # Configure logging
@@ -735,14 +779,25 @@ Examples:
         debug_dir = args.debug_dir or (args.output / "debug")
         debug_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Debug output: {debug_dir}")
-    
-    # Create processor
+
+    # Build engine configuration
+    engine_config = EngineConfig(
+        temperature=args.temperature,
+        max_tokens=MAX_LLM_TOKENS,
+        extra={
+            "base_url": args.lm_studio_url,
+        }
+    )
+
+    # Create processor with engine configuration
     processor = LLMProcessor(
         db_path=args.db,
         output_dir=args.output,
         debug_dir=debug_dir,
         dry_run=args.dry_run,
-        force=args.force
+        force=args.force,
+        engine_name=args.engine,
+        engine_config=engine_config
     )
     
     # Handle modes
