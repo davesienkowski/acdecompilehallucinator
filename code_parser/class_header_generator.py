@@ -135,6 +135,7 @@ Output Requirements:
 - Keep all existing methods; do not add or remove any
 - Add descriptive code comments for clarity
 - Produce valid C++ syntax
+- Only output the template class. No forward declarations, just the class and methods.
 
 Include Directives:
 - For referenced types with "// Defined in:" comments, use that path for the #include
