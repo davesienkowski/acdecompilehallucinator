@@ -187,6 +187,7 @@ class ContextBuilder:
         # Lazy-load components if not provided
         self._type_resolver = type_resolver
         self._constant_replacer = constant_replacer
+        self._code_preprocessor = None
 
         # Compile regex patterns
         self._compiled_patterns = [
@@ -211,6 +212,25 @@ class ContextBuilder:
             self._constant_replacer = ConstantReplacer(self.db)
         return self._constant_replacer
 
+    @property
+    def code_preprocessor(self) -> 'CodePreprocessor':
+        """Get or create CodePreprocessor instance.
+
+        The CodePreprocessor handles:
+        - Replacing decompiler types (BOOL -> bool, etc.)
+        - Removing calling conventions (__thiscall, etc.)
+        - Annotating magic numbers with enum values
+        - Annotating known constants
+        """
+        if self._code_preprocessor is None:
+            from .code_preprocessor import CodePreprocessor
+            self._code_preprocessor = CodePreprocessor(
+                db_handler=self.db,
+                type_resolver=self._type_resolver,
+                constant_replacer=self._constant_replacer,
+            )
+        return self._code_preprocessor
+
     # ═══════════════════════════════════════════════════════════════════════════
     # High-Level Context Gathering
     # ═══════════════════════════════════════════════════════════════════════════
@@ -222,6 +242,7 @@ class ContextBuilder:
         namespace: Optional[str] = None,
         include_enums: bool = True,
         include_constants: bool = True,
+        preprocess_code: bool = True,
         max_types: int = 10,
     ) -> ContextResult:
         """Gather complete context for method modernization.
@@ -236,6 +257,8 @@ class ContextBuilder:
             namespace: Optional namespace for the parent class.
             include_enums: Whether to extract enum value mappings.
             include_constants: Whether to annotate constants in code.
+            preprocess_code: Whether to run full preprocessing (type replacement,
+                calling convention removal, enum annotation). Default True.
             max_types: Maximum number of type definitions to include.
 
         Returns:
@@ -267,8 +290,22 @@ class ContextBuilder:
             result.enum_mappings = self.map_enum_values(result.numeric_literals)
             result.enum_context_str = self.format_enum_context(result.enum_mappings)
 
-        # 5. Preprocess code with constant annotations
-        if include_constants:
+        # 5. Preprocess code - apply all transformations
+        if preprocess_code:
+            # Use CodePreprocessor for comprehensive preprocessing
+            preprocessing_result = self.code_preprocessor.preprocess(
+                code,
+                replace_types=True,
+                remove_calling_conventions=True,
+                annotate_enums=include_enums,
+                annotate_constants=include_constants,
+            )
+            result.preprocessed_code = preprocessing_result.code
+            result.preprocessing_summary = preprocessing_result.get_summary()
+            result.decompiler_types_replaced = preprocessing_result.decompiler_types_replaced
+            result.calling_conventions_removed = preprocessing_result.calling_conventions_removed
+        elif include_constants:
+            # Fallback to just constant annotation
             result.preprocessed_code = self.annotate_constants(code)
         else:
             result.preprocessed_code = code
@@ -276,6 +313,7 @@ class ContextBuilder:
         logger.debug(
             f"Gathered context: {len(result.type_references)} types, "
             f"{len(result.enum_mappings)} enum mappings"
+            + (f", preprocessing: {result.preprocessing_summary}" if result.preprocessing_summary else "")
         )
 
         return result

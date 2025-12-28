@@ -162,6 +162,26 @@ class DatabaseHandler:
                 )
             ''')
             
+            # Create error_patterns table (for Error Memory feature)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS error_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT NOT NULL,
+                    pattern_hash TEXT NOT NULL,
+                    pattern_signature TEXT,
+                    original_snippet TEXT NOT NULL,
+                    failed_output TEXT,
+                    correct_output TEXT,
+                    error_description TEXT NOT NULL,
+                    method_name TEXT,
+                    class_name TEXT,
+                    occurrence_count INTEGER DEFAULT 1,
+                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(pattern_hash)
+                )
+            ''')
+            
             # Create indexes for faster queries on types table
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_type_name ON types(type, name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_namespace ON types(namespace)')
@@ -178,6 +198,10 @@ class DatabaseHandler:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_processed_method_name ON processed_methods(full_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_processed_method_parent ON processed_methods(parent_class)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_processed_method_is_processed ON processed_methods(is_processed)')
+            
+            # Create indexes for error_patterns table
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_error_category ON error_patterns(category)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_error_signature ON error_patterns(pattern_signature)')
             
             conn.commit()
     

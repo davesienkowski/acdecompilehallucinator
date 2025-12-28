@@ -36,6 +36,7 @@ from .base import (
 
 if TYPE_CHECKING:
     from code_parser.context_builder import ContextBuilder, ContextResult
+    from code_parser.error_memory import ErrorMemory
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,9 @@ class ClaudeCodeEngine(LLMEngine):
         # Load available skills
         self.skills: Dict[str, str] = {}
         self._load_skills()
+
+        # Error memory for learning from failures (optional, set via setter)
+        self._error_memory: Optional["ErrorMemory"] = None
 
     @property
     def name(self) -> str:
@@ -475,6 +479,21 @@ class ClaudeCodeEngine(LLMEngine):
         self._context_builder = context_builder
         logger.info("ContextBuilder attached to ClaudeCodeEngine")
 
+    def set_error_memory(self, error_memory: "ErrorMemory") -> None:
+        """Set the error memory for learning from failures.
+
+        When an ErrorMemory is set, modernize_method_with_verification()
+        will:
+        1. Check for similar error patterns before generation
+        2. Record failures with context for future reference
+        3. Record successful retries as correct solutions
+
+        Args:
+            error_memory: The ErrorMemory instance to use.
+        """
+        self._error_memory = error_memory
+        logger.info("ErrorMemory attached to ClaudeCodeEngine")
+
     def modernize_method_with_context(
         self,
         method_name: str,
@@ -482,6 +501,7 @@ class ClaudeCodeEngine(LLMEngine):
         raw_code: str,
         namespace: Optional[str] = None,
         context: Optional['ContextResult'] = None,
+        extra_context: Optional[str] = None,
     ) -> str:
         """Modernize a method with rich context from ContextBuilder.
 
@@ -495,6 +515,7 @@ class ClaudeCodeEngine(LLMEngine):
             raw_code: The raw decompiled method code.
             namespace: Optional namespace for the class.
             context: Pre-gathered context, or None to gather automatically.
+            extra_context: Optional additional context (e.g., error warnings).
 
         Returns:
             The modernized method implementation.
@@ -526,6 +547,11 @@ class ClaudeCodeEngine(LLMEngine):
 
         prompt_parts.append("# Context\n")
 
+        # Add error memory warnings if available (EARLY in prompt for emphasis)
+        if extra_context:
+            prompt_parts.append(extra_context)
+            prompt_parts.append("")
+
         # Add parent class context
         if context.parent_header:
             status = "modernized" if context.parent_is_processed else "raw"
@@ -550,10 +576,24 @@ class ClaudeCodeEngine(LLMEngine):
                 "enum reference above with their corresponding enum constants.\n"
             )
 
-        # Add the raw code to modernize
+        # Use preprocessed code if available, otherwise fall back to raw_code
+        # The preprocessed code has:
+        # - Decompiler types replaced (BOOL -> bool, __int64 -> int64_t, etc.)
+        # - Calling conventions removed (__thiscall, __cdecl, etc.)
+        # - Magic numbers annotated with potential enum values
+        code_to_modernize = context.preprocessed_code if context.preprocessed_code else raw_code
+
+        # Add preprocessing summary if transformations were applied
+        if context.preprocessing_summary:
+            prompt_parts.append(
+                f"## Preprocessing Applied\n"
+                f"The following automatic transformations have been applied: {context.preprocessing_summary}\n"
+            )
+
+        # Add the code to modernize (preprocessed or raw)
         prompt_parts.append(
-            f"## Raw Code to Modernize\n"
-            f"```cpp\n{raw_code}\n```\n"
+            f"## Code to Modernize\n"
+            f"```cpp\n{code_to_modernize}\n```\n"
         )
 
         prompt = "\n".join(prompt_parts)
@@ -574,6 +614,11 @@ class ClaudeCodeEngine(LLMEngine):
         FunctionProcessor, where the modernized code is verified for
         logic equivalence and regenerated if verification fails.
 
+        If ErrorMemory is configured, this method will:
+        1. Check for similar error patterns before first generation
+        2. Record failures with context for future reference
+        3. Record successful retries as correct solutions
+
         Args:
             method_name: The name of the method.
             parent_class: The parent class name.
@@ -585,18 +630,30 @@ class ClaudeCodeEngine(LLMEngine):
         Returns:
             Tuple of (modernized_code, final_verification_result).
         """
-        # Initial generation
+        # Check error memory for relevant warnings
+        error_warnings = ""
+        if self._error_memory:
+            error_warnings = self._error_memory.get_warnings_for_code(raw_code)
+            if error_warnings:
+                logger.info(
+                    f"Found {error_warnings.count('Issue')} relevant error warnings "
+                    f"for {parent_class}::{method_name}"
+                )
+
+        # Initial generation (with warnings if available)
         modernized = self.modernize_method_with_context(
             method_name=method_name,
             parent_class=parent_class,
             raw_code=raw_code,
             namespace=namespace,
             context=context,
+            extra_context=error_warnings if error_warnings else None,
         )
 
         # Verification loop
         retry_count = 0
         verification = None
+        last_failed_output = None
 
         while retry_count < max_retries:
             verification = self.verify_logic(raw_code, modernized)
@@ -611,9 +668,26 @@ class ClaudeCodeEngine(LLMEngine):
                         f"Method {parent_class}::{method_name} verified after "
                         f"{retry_count} retries"
                     )
+                    # Record successful retry solution to error memory
+                    if self._error_memory and last_failed_output:
+                        self._error_memory.record_success_after_retry(
+                            raw_code, modernized
+                        )
                 return modernized, verification
 
-            # Verification failed - build feedback prompt
+            # Verification failed - record to error memory
+            last_failed_output = modernized
+            if self._error_memory:
+                category = self._error_memory.categorize_error(verification.details)
+                self._error_memory.record_failure(
+                    category=category,
+                    original_code=raw_code,
+                    failed_output=modernized,
+                    error_description=verification.details,
+                    method_name=method_name,
+                    class_name=parent_class,
+                )
+
             logger.warning(
                 f"Method {parent_class}::{method_name} verification failed "
                 f"(attempt {retry_count + 1}/{max_retries}): {verification.details}"

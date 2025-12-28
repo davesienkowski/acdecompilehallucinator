@@ -11,6 +11,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from .skill_loader import SkillLoader, get_skill_loader
+from .error_memory import ErrorMemory, get_error_memory
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,7 @@ Return ONLY this JSON object:
     
     def __init__(self, db_handler, llm_client=None, debug_dir: Optional[Path] = None,
                  project_root: Optional[Path] = None, use_skills: bool = True,
-                 context_builder=None):
+                 context_builder=None, use_error_memory: bool = True):
         """
         Initialize the function processor.
 
@@ -242,6 +243,8 @@ Return ONLY this JSON object:
             use_skills: Whether to load and use skill instructions (default True)
             context_builder: Optional ContextBuilder instance for unified context
                 gathering. If provided, can be used instead of internal methods.
+            use_error_memory: Whether to use error memory for learning from
+                failures (default True).
         """
         self.db = db_handler
         self.llm = llm_client
@@ -257,6 +260,12 @@ Return ONLY this JSON object:
         else:
             self.skill_loader = None
             self._skill_instructions = ""
+
+        # Initialize error memory for learning from failures
+        if use_error_memory:
+            self.error_memory = get_error_memory(db_handler)
+        else:
+            self.error_memory = None
         
         # Patterns for extracting types from function code
         self.type_patterns = [
@@ -538,7 +547,8 @@ Return ONLY this JSON object:
         return '\n'.join(lines)
 
     def build_prompt(self, method_definition: str, parent_class: Optional[str],
-                     reference_context: str = "", analysis: str = "", enum_context: str = "") -> str:
+                     reference_context: str = "", analysis: str = "", 
+                     enum_context: str = "", error_warnings: str = "") -> str:
         """Build the LLM prompt for function modernization.
 
         Constructs a complete prompt including the method to modernize,
@@ -553,6 +563,9 @@ Return ONLY this JSON object:
                 definitions to include. Defaults to empty string.
             analysis: Optional analysis string from prior class analysis.
                 Currently unused but reserved for future enhancements.
+            enum_context: Enum value mappings for magic number replacement.
+            error_warnings: Warnings from error memory about similar code
+                patterns that failed previously.
 
         Returns:
             A complete prompt string ready to send to the LLM, including
@@ -567,6 +580,10 @@ Return ONLY this JSON object:
         
         if parent_class:
             prompt += f"\nThis function belongs to class: {parent_class}\n"
+
+        # Add error warnings early in prompt for emphasis
+        if error_warnings:
+            prompt += f"\n{error_warnings}\n"
         
         # Add parent class header context
         parent_header_context = self.get_parent_header_context(parent_class)
@@ -598,8 +615,98 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         prompt += f"\n{self.FEW_SHOT_FUNCTION}"
 
         return prompt
-    
-    
+
+    def build_prompt_with_context(self, method_definition: str, parent_class: Optional[str],
+                                   namespace: Optional[str] = None) -> str:
+        """Build prompt using the unified ContextBuilder for preprocessing.
+
+        This method uses the ContextBuilder to:
+        - Preprocess code (remove calling conventions, replace decompiler types)
+        - Gather type references and parent class context
+        - Map enum values for magic number replacement
+
+        Args:
+            method_definition: The raw decompiled C++ method code.
+            parent_class: Name of the class this method belongs to.
+            namespace: Optional namespace for the parent class.
+
+        Returns:
+            A complete prompt string with preprocessed code and context.
+        """
+        if self.context_builder is None:
+            # Fall back to non-preprocessed prompt
+            references = self.find_type_references(method_definition)
+            if parent_class:
+                references.discard(parent_class)
+            context = self.get_reference_context(references)
+            enum_context = self.get_enum_value_context(method_definition)
+            return self.build_prompt(method_definition, parent_class, context,
+                                     enum_context=enum_context)
+
+        # Use ContextBuilder for comprehensive context gathering and preprocessing
+        ctx = self.context_builder.gather_method_context(
+            code=method_definition,
+            parent_class=parent_class,
+            namespace=namespace,
+            include_enums=True,
+            include_constants=True,
+            preprocess_code=True,
+        )
+
+        # Use preprocessed code or fall back to original
+        code_to_use = ctx.preprocessed_code if ctx.preprocessed_code else method_definition
+
+        # Build preprocessing info string
+        preprocessing_info = ""
+        if ctx.preprocessing_summary:
+            preprocessing_info = f"\nPreprocessing Applied: {ctx.preprocessing_summary}\n"
+
+        # Build the prompt using the preprocessed code
+        prompt = f"""Modernize this decompiled C++ function:
+
+```cpp
+{code_to_use}
+```
+"""
+        if parent_class:
+            prompt += f"\nThis function belongs to class: {parent_class}\n"
+
+        if preprocessing_info:
+            prompt += preprocessing_info
+
+        # Add parent class header context from ContextBuilder
+        if ctx.parent_header:
+            status = "modernized" if ctx.parent_is_processed else "raw"
+            prompt += f"""
+Parent Class Definition ({status}):
+{ctx.parent_header}
+"""
+
+        # Add type context
+        if ctx.type_context_str:
+            prompt += f"""
+Referenced Types (for context):
+{ctx.type_context_str}
+"""
+
+        # Add enum context
+        if ctx.enum_context_str:
+            prompt += f"""
+{ctx.enum_context_str}
+
+IMPORTANT: Replace ALL numeric literals that appear in the enum reference above with their corresponding enum constants. Use the fully qualified enum name (e.g., EnumName::CONSTANT).
+"""
+
+        # Add skill-based instructions
+        if self._skill_instructions:
+            prompt += f"""
+{self._skill_instructions}
+"""
+
+        prompt += f"\n{self.FEW_SHOT_FUNCTION}"
+
+        return prompt
+
     def verify_logic(self, original: str, processed: str) -> Tuple[bool, str]:
         """Verify that modernized code preserves the original logic.
 
@@ -651,11 +758,13 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         logic, and optionally stores the result.
 
         The processing pipeline:
-        1. Extract type references from the function code
-        2. Gather context from referenced types and parent class
-        3. Build and send prompt to LLM
-        4. Verify the modernized code preserves logic (with retries)
-        5. Store result in database if requested
+        1. Check error memory for relevant warnings
+        2. Extract type references from the function code
+        3. Gather context from referenced types and parent class
+        4. Build and send prompt to LLM (with error warnings if available)
+        5. Verify the modernized code preserves logic (with retries)
+        6. Record failures/successes to error memory
+        7. Store result in database if requested
 
         Args:
             method_row: Database row tuple containing method information in
@@ -684,6 +793,15 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         namespace = method_row[4] if len(method_row) > 4 else None
         parent = method_row[5] if len(method_row) > 5 else None
         offset = method_row[8] if len(method_row) > 8 else "0"
+
+        # Check error memory for relevant warnings (if enabled)
+        error_warnings = ""
+        if self.error_memory:
+            error_warnings = self.error_memory.get_warnings_for_code(definition)
+            if error_warnings:
+                logger.info(
+                    f"Found relevant error warnings for {full_name}"
+                )
         
         # Find type references from the function definition
         references = self.find_type_references(definition)
@@ -722,8 +840,13 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         # Get enum value context for magic number replacement
         enum_context = self.get_enum_value_context(definition)
 
-        # Build prompt and call LLM - include enum context for magic number replacement
-        prompt = self.build_prompt(definition, parent, context, analysis=None, enum_context=enum_context)
+        # Build prompt and call LLM - include enum context and error warnings
+        prompt = self.build_prompt(
+            definition, parent, context, 
+            analysis=None, 
+            enum_context=enum_context,
+            error_warnings=error_warnings
+        )
         processed_code = self._call_llm(prompt)
         
         if not processed_code:
@@ -742,6 +865,7 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         reason = ""
         retry_count = 0
         max_retries = 5
+        last_failed_output = None
         
         while not is_valid and retry_count < max_retries:
             is_valid, reason = self.verify_logic(definition, processed_code)
@@ -749,6 +873,19 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
             if not is_valid and retry_count < max_retries:
                 # Log the validation failure with retry count
                 logger.warning(f"Function {full_name} validation failed on attempt {retry_count + 1}/{max_retries}: {reason}")
+                
+                # Record failure to error memory (if enabled)
+                last_failed_output = processed_code
+                if self.error_memory:
+                    category = self.error_memory.categorize_error(reason)
+                    self.error_memory.record_failure(
+                        category=category,
+                        original_code=definition,
+                        failed_output=processed_code,
+                        error_description=reason,
+                        method_name=name,
+                        class_name=parent,
+                    )
                 
                 # Build a feedback prompt to improve the function based on the verification failure
                 feedback_prompt = f"""Original function:
@@ -779,6 +916,11 @@ Please regenerate the function addressing the issues mentioned in the verificati
                         logger.info(f"Function {full_name} validation successful on first attempt")
                     else:
                         logger.info(f"Function {full_name} validation successful after {retry_count} retries")
+                        # Record successful retry to error memory
+                        if self.error_memory and last_failed_output:
+                            self.error_memory.record_success_after_retry(
+                                definition, processed_code
+                            )
 
         # Debug output
         if self.debug_dir and parent:

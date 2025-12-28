@@ -10,6 +10,7 @@ enabling faster processing and more accurate type resolution.
 
 import logging
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -143,7 +144,7 @@ class TypeResolver:
             self._add_to_cache(type_info)
 
         # Load processed types (overwrite raw if exists)
-        with self.db._connect() as conn:
+        with sqlite3.connect(self.db.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT name, type, processed_header, engine_used
@@ -549,7 +550,7 @@ class TypeResolver:
 
     def refresh_processed_types(self) -> None:
         """Refresh cache with newly processed types from database."""
-        with self.db._connect() as conn:
+        with sqlite3.connect(self.db.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT name, type, processed_header, engine_used

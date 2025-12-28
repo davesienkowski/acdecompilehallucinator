@@ -18,6 +18,9 @@ from .llm_cache import LLMCache
 from .type_resolver import TypeResolver
 from .skill_loader import SkillLoader, get_skill_loader
 from .context_builder import ContextBuilder, ContextResult, EnumValueMapping
+from .code_preprocessor import CodePreprocessor, PreprocessingResult
+from .error_memory import ErrorMemory, ErrorPattern, ErrorCategory, get_error_memory
+from .pattern_library import PatternLibrary, PatternCategory, get_pattern_library
 # NOTE: LLMClient and LLMProcessor have been removed.
 # Use engines.get_engine("lm-studio") or engines.get_engine("claude-code") instead.
 # The LLMProcessor class is now in llm_process.py (CLI entry point).
@@ -44,6 +47,9 @@ __all__ = [
     'ConstantReplacer', 'LLMCache', 'TypeResolver',
     'SkillLoader', 'get_skill_loader',
     'ContextBuilder', 'ContextResult', 'EnumValueMapping',
+    'CodePreprocessor', 'PreprocessingResult',
+    'ErrorMemory', 'ErrorPattern', 'ErrorCategory', 'get_error_memory',
+    'PatternLibrary', 'PatternCategory', 'get_pattern_library',
     # Exceptions
     'ACDecompileError',
     'ParsingError', 'HeaderParsingError', 'SourceParsingError',
