@@ -21,6 +21,7 @@ import json
 import logging
 import subprocess
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional, Any, Dict, List, TYPE_CHECKING
 
@@ -89,12 +90,21 @@ class ClaudeCodeEngine(LLMEngine):
         super().__init__(config, cache)
 
         # Extract Claude Code specific config
-        self.project_root = self.config.extra.get("project_root", ".")
+        project_root = self.config.extra.get("project_root", ".")
+        self.project_root = str(Path(project_root).resolve())
         self.cli_timeout = self.config.extra.get("cli_timeout", DEFAULT_TIMEOUT)
         self.print_mode = self.config.extra.get("print_mode", True)
 
         # Check if Claude Code CLI is available
+        # On Windows, also try common variants (.exe, .cmd)
         self.cli_path = shutil.which("claude")
+        if not self.cli_path and sys.platform == "win32":
+            # Try explicit extensions on Windows
+            for variant in ["claude.exe", "claude.cmd"]:
+                self.cli_path = shutil.which(variant)
+                if self.cli_path:
+                    break
+
         if not self.cli_path:
             logger.warning(
                 "Claude Code CLI not found. Install with: npm install -g @anthropic/claude-code"
@@ -102,6 +112,8 @@ class ClaudeCodeEngine(LLMEngine):
             # Don't raise error - allow engine to be registered but not used
             self._initialized = False
         else:
+            # Normalize path for consistent handling
+            self.cli_path = str(Path(self.cli_path).resolve())
             self._initialized = True
             logger.info(f"Claude Code CLI found at: {self.cli_path}")
 
@@ -149,21 +161,63 @@ class ClaudeCodeEngine(LLMEngine):
                 return cached
 
         try:
-            # Build command
-            cmd = [self.cli_path, "-p", prompt]
-            if self.print_mode:
-                cmd.append("--print")
+            # Windows has a command line limit of ~8191 characters
+            # For long prompts, we pipe via stdin instead of command-line args
+            MAX_CMDLINE_PROMPT = 6000  # Leave room for command and other args
 
-            logger.debug(f"Executing: {' '.join(cmd[:3])}...")
+            # Verify CLI path exists
+            if not Path(self.cli_path).exists():
+                raise EngineConnectionError(
+                    f"Claude Code CLI path does not exist: {self.cli_path}",
+                    engine_name=self.name
+                )
 
-            # Execute Claude Code CLI
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=self.project_root,
-                timeout=self.cli_timeout,
+            # Verify CWD exists
+            cwd = self.project_root if Path(self.project_root).exists() else None
+
+            # On Windows, npm-installed CLIs may need shell=True
+            # Also handle .cmd/.bat scripts that Windows uses for npm binaries
+            use_shell = sys.platform == "win32" and (
+                self.cli_path.lower().endswith(('.cmd', '.bat')) or
+                not self.cli_path.lower().endswith('.exe')
             )
+
+            # Build command - use stdin for long prompts to avoid Windows limit
+            if len(prompt) > MAX_CMDLINE_PROMPT:
+                # Pipe prompt via stdin
+                cmd = [self.cli_path, "-p"]
+                if self.print_mode:
+                    cmd.append("--print")
+                logger.debug(f"Executing (stdin): {' '.join(cmd)}... ({len(prompt)} chars)")
+
+                # Execute with stdin piping - use UTF-8 for Unicode support
+                result = subprocess.run(
+                    cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    cwd=cwd,
+                    timeout=self.cli_timeout,
+                    shell=use_shell,
+                )
+            else:
+                # Short prompt - pass as argument
+                cmd = [self.cli_path, "-p", prompt]
+                if self.print_mode:
+                    cmd.append("--print")
+                logger.debug(f"Executing: {' '.join(cmd[:3])}...")
+
+                # Execute Claude Code CLI - use UTF-8 for Unicode support
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    cwd=cwd,
+                    timeout=self.cli_timeout,
+                    shell=use_shell,
+                )
 
             if result.returncode != 0:
                 error_msg = result.stderr.strip() if result.stderr else "Unknown error"
@@ -194,9 +248,10 @@ class ClaudeCodeEngine(LLMEngine):
                 f"Claude Code timed out after {self.cli_timeout}s",
                 engine_name=self.name
             )
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            logger.error(f"FileNotFoundError executing CLI at {self.cli_path}: {e}")
             raise EngineConnectionError(
-                "Claude Code CLI not found",
+                f"Claude Code CLI not found at {self.cli_path}",
                 engine_name=self.name
             )
         except subprocess.SubprocessError as e:

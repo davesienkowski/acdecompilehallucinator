@@ -858,8 +858,6 @@ IMPORTANT: Replace ALL numeric literals that appear in the enum reference above 
         # ────────────────────────────────────────────────────────────────────────
         # Verification Step with retry logic
         # ────────────────────────────────────────────────────────────────────────
-        import logging
-        logger = logging.getLogger(__name__)
         
         is_valid = False
         reason = ""
