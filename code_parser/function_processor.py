@@ -229,7 +229,7 @@ Return ONLY this JSON object:
 """
     
     def __init__(self, db_handler, llm_client=None, debug_dir: Optional[Path] = None,
-                 project_root: Optional[Path] = None):
+                 project_root: Optional[Path] = None, use_skills: bool = True):
         """
         Initialize the function processor.
 
@@ -238,15 +238,21 @@ Return ONLY this JSON object:
             llm_client: Optional LLM client for processing
             debug_dir: Optional directory for debug output
             project_root: Optional project root for skill loading
+            use_skills: Whether to load and use skill instructions (default True)
         """
         self.db = db_handler
         self.llm = llm_client
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.dependency_analyzer = None  # Set externally if needed
+        self.use_skills = use_skills
 
-        # Load skill instructions for prompt enhancement
-        self.skill_loader = get_skill_loader(project_root)
-        self._skill_instructions = self._load_skill_instructions()
+        # Load skill instructions for prompt enhancement (if enabled)
+        if use_skills:
+            self.skill_loader = get_skill_loader(project_root)
+            self._skill_instructions = self._load_skill_instructions()
+        else:
+            self.skill_loader = None
+            self._skill_instructions = ""
         
         # Patterns for extracting types from function code
         self.type_patterns = [

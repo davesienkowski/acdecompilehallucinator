@@ -105,7 +105,8 @@ class LLMProcessor:
                  force: bool = False,
                  engine: Optional[LLMEngine] = None,
                  engine_name: str = DEFAULT_ENGINE,
-                 engine_config: Optional[EngineConfig] = None):
+                 engine_config: Optional[EngineConfig] = None,
+                 use_skills: bool = True):
         """
         Initialize the processor.
 
@@ -118,18 +119,21 @@ class LLMProcessor:
             engine: Pre-configured LLM engine instance (optional)
             engine_name: Name of engine to use if no engine provided
             engine_config: Configuration for engine if no engine provided
+            use_skills: Whether to use skill-based prompt enhancement (default True)
         """
         self.db = DatabaseHandler(str(db_path))
         self.output_dir = Path(output_dir)
         self.debug_dir = Path(debug_dir) if debug_dir else None
         self.dry_run = dry_run
         self.force = force
+        self.use_skills = use_skills
         self.processed_owners = set()
 
         # Initialize cache (separate database)
         cache_path = self.db.db_path.parent / "llm_cache.db"
         self.cache = LLMCache(cache_path)
         logger.info(f"LLM Cache: {cache_path}")
+        logger.info(f"Skill enhancement: {'enabled' if use_skills else 'disabled'}")
 
         # Initialize components
         self.analyzer = DependencyAnalyzer(self.db)
@@ -237,7 +241,9 @@ class LLMProcessor:
             self._func_processor = FunctionProcessor(
                 self.db,
                 llm_client=self.llm_client if not self.dry_run else None,
-                debug_dir=self.debug_dir
+                debug_dir=self.debug_dir,
+                project_root=Path.cwd(),
+                use_skills=self.use_skills
             )
         return self._func_processor
     
@@ -719,6 +725,8 @@ Engine details:
         help="Force re-processing (clears previous results for this class)")
     parser.add_argument("--verbose", "-v", action="store_true",
         help="Enable verbose logging")
+    parser.add_argument("--no-skills", action="store_true",
+        help="Disable skill-based prompt enhancement (use raw few-shot prompts)")
 
     args = parser.parse_args()
     
@@ -766,7 +774,8 @@ Engine details:
         dry_run=args.dry_run,
         force=args.force,
         engine_name=args.engine,
-        engine_config=engine_config
+        engine_config=engine_config,
+        use_skills=not args.no_skills
     )
     
     # Handle modes
