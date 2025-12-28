@@ -23,3 +23,7 @@ CLAUDE.local.md
 .DS_Store
 *.swp
 *.swo
+
+# Source files (large decompiled code)
+acclient.zip
+acclient/
