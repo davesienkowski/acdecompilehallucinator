@@ -6,3 +6,10 @@ acclient.c
 acclient.txt
 .venv
 __pycache__
+
+# Source files (large decompiled code)
+acclient.zip
+acclient/
+
+# Serena MCP local data
+.serena/
