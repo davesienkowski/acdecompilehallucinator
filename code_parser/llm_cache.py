@@ -7,14 +7,27 @@ logger = logging.getLogger("llm-cache")
 
 class LLMCache:
     """Handles a separate SQLite database for caching LLM prompts and responses."""
-    
+
     def __init__(self, db_path: Path):
+        """Initialize the LLM cache database.
+
+        Creates the parent directory if it doesn't exist and initializes
+        the database schema.
+
+        Args:
+            db_path: Path to the SQLite database file for caching.
+        """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
     
     def init_db(self):
-        """Initialize the cache database with the logic table structure."""
+        """Initialize the cache database with the required table structure.
+
+        Creates the llm_cache table if it doesn't exist. The table stores
+        prompts as primary keys with their corresponding responses and
+        creation timestamps.
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -27,7 +40,15 @@ class LLMCache:
             conn.commit()
     
     def get(self, prompt: str) -> Optional[str]:
-        """Retrieve a cached response for the given prompt."""
+        """Retrieve a cached response for the given prompt.
+
+        Args:
+            prompt: The exact prompt string to look up in the cache.
+
+        Returns:
+            The cached response string if found, or None if no cache entry
+            exists for the prompt or if a database error occurs.
+        """
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -39,7 +60,16 @@ class LLMCache:
             return None
             
     def set(self, prompt: str, response: str):
-        """Store a prompt and its response in the cache."""
+        """Store a prompt and its response in the cache.
+
+        Uses INSERT OR REPLACE to update existing entries if the same
+        prompt is cached again. Empty responses are silently ignored.
+
+        Args:
+            prompt: The prompt string to use as the cache key.
+            response: The LLM response to cache. If empty, the method
+                returns without storing anything.
+        """
         if not response:
             return
             

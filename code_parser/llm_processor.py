@@ -28,7 +28,24 @@ from code_parser.llm_client import LM_STUDIO_URL
 
 
 def clean_llm_output(text: str) -> str:
-    """Remove common LLM output artifacts"""
+    """Remove common LLM output artifacts from generated code.
+
+    Cleans up markdown code blocks, formatting artifacts, and other common
+    patterns that LLMs add to code output that would break compilation.
+
+    Args:
+        text: Raw LLM output text that may contain markdown or formatting.
+
+    Returns:
+        Cleaned text with markdown code fences and formatting removed.
+        Returns empty string if input is None or empty.
+
+    Examples:
+        >>> clean_llm_output("```cpp\\nint x = 1;\\n```")
+        'int x = 1;'
+        >>> clean_llm_output("**bold** text")
+        'bold text'
+    """
     if not text:
         return ""
     
@@ -44,11 +61,27 @@ def clean_llm_output(text: str) -> str:
 
 
 def split_namespace(full_name: str) -> tuple[Optional[str], str]:
-    """
-    Split a fully qualified name into (namespace, simple_name).
-    Follows mcp-sources convention:
-    - Namespace is the top-level namespace only (e.g. 'Turbine::Debug' -> 'Turbine')
-    - Simple name is the last part (e.g. 'Turbine::Debug::Assert' -> 'Assert')
+    """Split a fully qualified C++ name into namespace and simple name.
+
+    Follows the mcp-sources convention where namespace is the top-level
+    namespace only, not the full nested namespace path.
+
+    Args:
+        full_name: Fully qualified C++ name with '::' separators.
+            Example: 'Turbine::Debug::Assert'
+
+    Returns:
+        A tuple of (namespace, simple_name) where:
+        - namespace: Top-level namespace or None if no namespace.
+        - simple_name: The final component of the name.
+
+    Examples:
+        >>> split_namespace('Turbine::Debug::Assert')
+        ('Turbine', 'Assert')
+        >>> split_namespace('PlayerModule')
+        (None, 'PlayerModule')
+        >>> split_namespace('Turbine::ACString')
+        ('Turbine', 'ACString')
     """
     if '::' in full_name:
         parts = full_name.split('::')
@@ -64,18 +97,31 @@ class LLMProcessor:
     one at a time, with optional debug output.
     """
     
-    def __init__(self, db_path: Path, output_dir: Path, 
+    def __init__(self, db_path: Path, output_dir: Path,
                  debug_dir: Optional[Path] = None,
                  dry_run: bool = False,
                  force: bool = False):
-        """
-        Initialize the processor.
-        
+        """Initialize the LLM processor with database and output configuration.
+
+        Sets up the processing pipeline including database connection, LLM cache,
+        dependency analyzer, and class assembler. LLM client and generators are
+        lazy-loaded on first use to avoid unnecessary initialization.
+
         Args:
-            db_path: Path to types.db database
-            output_dir: Output directory for generated files
-            debug_dir: Optional directory for debug output
-            dry_run: If True, don't call LLM or write files
+            db_path: Path to the types.db SQLite database containing parsed
+                type definitions and methods from the decompiled source.
+            output_dir: Root directory for generated C++ files. Headers go to
+                output_dir/include/{Namespace}/ and sources to
+                output_dir/src/{Namespace}/.
+            debug_dir: Optional directory for saving debug artifacts like
+                prompts and raw LLM responses. If None, debug output is disabled.
+            dry_run: If True, skip LLM calls and file writes. Useful for
+                previewing what would be processed without making changes.
+            force: If True, reprocess types even if they already have
+                generated output files. Clears previous results before processing.
+
+        Raises:
+            sqlite3.Error: If database connection fails.
         """
         self.db = DatabaseHandler(str(db_path))
         self.output_dir = Path(output_dir)
@@ -101,7 +147,26 @@ class LLMProcessor:
         self._func_processor = None
     
     def get_file_owner(self, type_name: str) -> str:
-        """Find the top-level struct/class that owns this type's file."""
+        """Find the top-level struct/class that owns this type's file.
+
+        For nested types, finds the outermost struct that contains them.
+        This determines which file the type's code should be written to,
+        since nested types share a file with their containing type.
+
+        Args:
+            type_name: Fully qualified type name, possibly with '::' separators
+                for nested types. Example: 'Turbine::Client::PlayerModule::Inner'.
+
+        Returns:
+            The name of the top-level struct that owns this type's file.
+            For non-nested types, returns the input unchanged.
+
+        Examples:
+            >>> processor.get_file_owner('Turbine::Client')
+            'Turbine::Client'  # If Turbine::Client is a struct
+            >>> processor.get_file_owner('Turbine::Client::Inner')
+            'Turbine::Client'  # If Client contains Inner
+        """
         if '::' not in type_name:
             return type_name
             
@@ -116,7 +181,22 @@ class LLMProcessor:
         return type_name
 
     def get_header_path(self, type_name: str) -> Path:
-        """Get the expected header path for a type"""
+        """Get the expected header file path for a type.
+
+        Computes the output path where the header file for this type should
+        be written. Handles template instantiations specially by routing them
+        to a Templates/ subdirectory.
+
+        Args:
+            type_name: Fully qualified type name. For template instantiations
+                like 'PStringBase<char>', uses the base template name.
+
+        Returns:
+            Path to the header file. Structure follows:
+            - Regular types: output_dir/include/{Namespace}/{SimpleName}.h
+            - Templates: output_dir/include/Templates/{Namespace}/{SimpleName}.h
+            - No namespace: output_dir/include/{SimpleName}.h
+        """
         # If it's a template instantiation, we use its base name's owner
         effective_name = type_name
         if self.header_generator.is_template_instantiation(type_name):
@@ -136,7 +216,25 @@ class LLMProcessor:
         return self.output_dir / "include" / f"{simple_name}.h"
 
     def get_source_path(self, type_name: str) -> Path:
-        """Get the expected source path for a type"""
+        """Get the expected source (.cpp) file path for a type.
+
+        Computes the output path where the source file containing method
+        implementations should be written. Template instantiations use
+        their base template name for path computation.
+
+        Args:
+            type_name: Fully qualified type name. For template instantiations,
+                the base template name is used to determine the path.
+
+        Returns:
+            Path to the source file. Structure follows:
+            - With namespace: output_dir/src/{Namespace}/{SimpleName}.cpp
+            - No namespace: output_dir/src/{SimpleName}.cpp
+
+        Note:
+            Template instantiations typically don't have separate source files
+            since their implementations are in the header.
+        """
         effective_name = type_name
         if self.header_generator.is_template_instantiation(type_name):
             effective_name = self.header_generator.get_template_base_name(type_name)
@@ -149,14 +247,30 @@ class LLMProcessor:
 
     @property
     def llm_client(self) -> LLMClient:
-        """Lazy-load LLM client"""
+        """Lazy-loaded LLM client for code generation requests.
+
+        Creates the LLM client on first access to avoid initialization
+        overhead when not needed (e.g., in dry-run mode).
+
+        Returns:
+            Configured LLMClient instance connected to LM Studio at localhost:1234
+            with response caching enabled.
+        """
         if self._llm_client is None:
             self._llm_client = LLMClient(cache=self.cache, db_handler=self.db)
         return self._llm_client
     
     @property
     def header_generator(self) -> ClassHeaderGenerator:
-        """Lazy-load header generator with debug support"""
+        """Lazy-loaded header generator for C++ class declarations.
+
+        Creates the header generator on first access. In dry-run mode,
+        the generator is created without an LLM client to prevent API calls.
+
+        Returns:
+            Configured ClassHeaderGenerator instance with dependency analyzer
+            attached for resolving type references.
+        """
         if self._header_gen is None:
             self._header_gen = ClassHeaderGenerator(
                 self.db, 
@@ -168,7 +282,15 @@ class LLMProcessor:
     
     @property
     def function_processor(self) -> FunctionProcessor:
-        """Lazy-load function processor with debug support"""
+        """Lazy-loaded function processor for C++ method modernization.
+
+        Creates the function processor on first access. In dry-run mode,
+        the processor is created without an LLM client to prevent API calls.
+
+        Returns:
+            Configured FunctionProcessor instance for converting decompiled
+            method implementations to modern C++.
+        """
         if self._func_processor is None:
             self._func_processor = FunctionProcessor(
                 self.db,
@@ -178,7 +300,18 @@ class LLMProcessor:
         return self._func_processor
     
     def get_processing_order(self) -> List[Dict[str, str]]:
-        """Get types to process in dependency order"""
+        """Get all types to process in topologically-sorted dependency order.
+
+        Returns types ordered so that dependencies are processed before
+        dependents. Checks for a cached processing_order.json first,
+        otherwise builds the order from the dependency analyzer.
+
+        Returns:
+            List of dictionaries with 'name' and 'kind' keys, sorted so
+            base classes and referenced types appear before their users.
+            Example: [{'name': 'BaseClass', 'kind': 'struct'},
+                      {'name': 'DerivedClass', 'kind': 'struct'}]
+        """
         # Check for existing processing_order.json
         order_file = self.output_dir.parent / "mcp-sources" / "processing_order.json"
         if order_file.exists():
@@ -191,7 +324,19 @@ class LLMProcessor:
         return [{"name": name, "kind": kind} for name, kind in order]
     
     def process_enum(self, enum_name: str, pbar: Optional[tqdm] = None) -> Optional[Path]:
-        """Process an enum (copy to header, no LLM needed)"""
+        """Process an enum type by copying it to a header file.
+
+        Enums are copied directly without LLM processing since they don't
+        require modernization. In dry-run mode, creates a placeholder header.
+
+        Args:
+            enum_name: Fully qualified enum name to process.
+            pbar: Optional tqdm progress bar to update on completion.
+
+        Returns:
+            Path to the generated header file, or None if processing failed.
+            In dry-run mode, returns path to placeholder file.
+        """
         import time
         start_time = time.time()
         
@@ -282,7 +427,21 @@ enum class {simple_name} {{
         return path
 
     def group_templates(self, order: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        """Group template instantiations by their base name"""
+        """Group template instantiations by their base template name.
+
+        Multiple instantiations of the same template (e.g., PStringBase<char>
+        and PStringBase<wchar_t>) share a single header file. This method
+        filters the processing order to include only one representative
+        instantiation per template base name.
+
+        Args:
+            order: List of type dictionaries from get_processing_order().
+
+        Returns:
+            Filtered list with duplicate template instantiations removed.
+            The first instantiation encountered becomes the representative
+            and is marked with 'is_representative': True.
+        """
         grouped_order = []
         processed_templates = set()
 
@@ -304,7 +463,22 @@ enum class {simple_name} {{
         return grouped_order
     
     def process_class(self, class_name: str, pbar: Optional[tqdm] = None) -> Dict[str, Any]:
-        """Process a single class by name (determines if enum or struct)"""
+        """Process a single class by name, auto-detecting its type.
+
+        Entry point for processing any type. Determines whether the type is
+        an enum or struct and delegates to the appropriate processor. For
+        nested types, redirects to the file owner.
+
+        Args:
+            class_name: Fully qualified type name to process.
+            pbar: Optional tqdm progress bar to update on completion.
+
+        Returns:
+            Dictionary with processing results:
+            - header_path: Path to generated header, or None if failed.
+            - source_path: Path to generated source, or None if enum/failed.
+            - method_count: Number of methods processed (0 for enums).
+        """
         # Determine owner
         owner = self.get_file_owner(class_name)
         if owner != class_name:
@@ -326,13 +500,27 @@ enum class {simple_name} {{
         return result
 
     def process_struct(self, class_name: str, pbar: Optional[tqdm] = None) -> Dict[str, Any]:
-        """
-        Process a struct/class: generate header + process methods.
-        
-        Returns dict with:
-        - header_path: Path to generated header
-        - source_path: Path to generated source
-        - method_count: Number of methods processed
+        """Process a struct/class by generating header and modernizing methods.
+
+        Full processing pipeline for a struct type:
+        1. Analyze class structure and dependencies using LLM.
+        2. Generate modern C++ header with class declaration.
+        3. Process each method to modernize the implementation.
+        4. Assemble source file with all processed methods.
+
+        Handles resumption by checking for existing output files and
+        skipping already-processed methods. Template instantiations skip
+        separate method processing since implementations are inline.
+
+        Args:
+            class_name: Fully qualified struct/class name to process.
+            pbar: Optional tqdm progress bar to update as work completes.
+
+        Returns:
+            Dictionary with processing results:
+            - header_path: Path to generated header file, or None on failure.
+            - source_path: Path to generated source file, or None if no methods.
+            - method_count: Number of methods successfully processed.
         """
         result = {"header_path": None, "source_path": None, "method_count": 0}
         
@@ -665,7 +853,21 @@ void {simple_name_source}::{method_name}() {{
         return self.process_struct(class_name, pbar=pbar)
 
     def calculate_work_units(self, order: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Calculate number of headers and methods that actually need processing."""
+        """Calculate the number of work units (headers + methods) needing processing.
+
+        Scans the processing order to determine how much work remains by
+        checking which output files exist and which methods are already
+        processed. Used for accurate progress bar initialization.
+
+        Args:
+            order: List of type dictionaries from get_processing_order().
+
+        Returns:
+            Dictionary with work unit counts:
+            - headers: Number of header files to generate.
+            - methods: Number of methods to process.
+            - total: Sum of headers and methods (for progress bar).
+        """
         total_headers = 0
         total_methods = 0
         processed_owners = set()
@@ -725,14 +927,25 @@ void {simple_name_source}::{method_name}() {{
         }
 
     def process_all_internal(self, filter_classes: Optional[List[str]] = None) -> Dict[str, Any]:
-        """
-        Process all types in dependency order.
-        
+        """Process all types in dependency order with progress tracking.
+
+        Internal implementation of batch processing. Iterates through the
+        processing order, handling each type and tracking statistics.
+        Displays a progress bar with adaptive ETA based on average
+        processing times.
+
         Args:
-            filter_classes: Optional list of class names to process (skip others)
-            
+            filter_classes: Optional list of class names to process.
+                If provided, only these types are processed; others are skipped.
+                Useful for targeted reprocessing of specific classes.
+
         Returns:
-            Summary statistics
+            Dictionary with processing statistics:
+            - total: Total number of types in processing order.
+            - enums_processed: Count of successfully processed enums.
+            - structs_processed: Count of successfully processed structs.
+            - methods_processed: Total methods processed across all structs.
+            - errors: List of error dictionaries with 'name' and 'error' keys.
         """
         order = self.get_processing_order()
         
@@ -832,7 +1045,25 @@ void {simple_name_source}::{method_name}() {{
         return stats
     
     def process_all(self, filter_classes: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Process all types in dependency order"""
+        """Process all types in dependency order with safety checks.
+
+        Public entry point for batch processing. Wraps process_all_internal
+        with safety checks to prevent accidental mass deletion of existing
+        output when force mode is enabled without a filter.
+
+        Args:
+            filter_classes: Optional list of specific class names to process.
+                If provided, only these types are processed. Required when
+                using force mode for safety reasons.
+
+        Returns:
+            Dictionary with processing statistics from process_all_internal().
+
+        Note:
+            The force flag is ignored for bulk processing (no filter_classes)
+            as a safety measure to prevent accidental reprocessing of the
+            entire codebase.
+        """
         # Note: We don't support force for process_all to prevent accidental mass deletion
         # unless filter_classes is provided
         
@@ -844,7 +1075,13 @@ void {simple_name_source}::{method_name}() {{
         return stats
     
     def show_plan(self):
-        """Show what would be processed (dry-run mode)"""
+        """Display a preview of the processing plan without executing.
+
+        Logs a summary of what would be processed, including counts of
+        enums and structs, and details for the first 20 types in the
+        processing order. Useful for reviewing the plan before starting
+        a long-running batch process.
+        """
         order = self.get_processing_order()
 
         logger.info("=" * 60)

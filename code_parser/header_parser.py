@@ -11,11 +11,16 @@ class HeaderParser:
     """Parses C++ header files and extracts struct definitions"""
     
     def __init__(self, header_file: str):
+        """Initialize the HeaderParser with a header file path.
+
+        Args:
+            header_file: Path to the C++ header file to parse.
+        """
         self.header_file = header_file
         self.typedefs: List[str] = []
         self.structs: Dict[str, Struct] = {}
         self.enums: Dict[str, Enum] = {}
-        
+
         # Statistics counters
         self.stats = {
             'structs_found': 0,
@@ -28,7 +33,15 @@ class HeaderParser:
         }
     
     def read_file_safely(self) -> str:
-        """Read file with multiple encoding attempts"""
+        """Read the header file with encoding fallback.
+
+        Attempts to read the file using multiple encodings in order:
+        utf-8, latin-1, cp1252. Falls back to utf-8 with replacement
+        characters if all encodings fail.
+
+        Returns:
+            The file contents as a decoded string.
+        """
         with open(self.header_file, 'rb') as f:
             raw = f.read()
         for encoding in ['utf-8', 'latin-1', 'cp1252']:
@@ -39,13 +52,30 @@ class HeaderParser:
         return raw.decode('utf-8', errors='replace')
     
     def parse_typedef(self, def_line: str, lines: List[str], i: int) -> int:
-        """Parse typedef definition"""
+        """Parse a typedef definition and store it.
+
+        Args:
+            def_line: The typedef definition line to parse.
+            lines: All lines from the header file.
+            i: Current line index in the file.
+
+        Returns:
+            The updated line index after parsing the typedef.
+        """
         self.typedefs.append(def_line.strip())
         self.stats['typedefs_found'] += 1
         return i
     
     def parse(self):
-        """Main parsing method"""
+        """Parse the header file and extract type definitions.
+
+        Reads the header file and extracts structs, enums, typedefs, and
+        unions. Results are stored in the instance attributes (structs,
+        enums, typedefs) and statistics are updated accordingly.
+
+        Handles special comment markers (/* N */) that precede type
+        definitions in decompiled output.
+        """
         content = self.read_file_safely()
         lines = content.splitlines()
         i = 0
@@ -112,7 +142,11 @@ class HeaderParser:
             i += 1
     
     def print_stats(self):
-        """Print statistics about parsed types"""
+        """Print statistics about parsed types to the logger.
+
+        Logs counts of structs, enums, typedefs, and unions found during
+        parsing, including how many of each were ignored.
+        """
         logger.info(f"Structs found: {self.stats['structs_found'] - self.stats['structs_ignored']} (ignored: {self.stats['structs_ignored']})")
         logger.info(f"Enums found: {self.stats['enums_found'] - self.stats['enums_ignored']} (ignored: {self.stats['enums_ignored']})")
         logger.info(f"Typedefs found: {self.stats['typedefs_found']}")

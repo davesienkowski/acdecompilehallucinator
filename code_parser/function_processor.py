@@ -285,7 +285,18 @@ Return ONLY this JSON object:
         (debug_dir / "response.txt").write_text(response, encoding='utf-8')
 
     def find_type_references(self, code: str) -> Set[str]:
-        """Find all type names used in function code"""
+        """Find all type references in function code.
+
+        Scans the provided C++ code for type names using regex patterns.
+        Filters out primitive types and common type aliases.
+
+        Args:
+            code: The C++ function code to analyze for type references.
+
+        Returns:
+            A set of type names found in the code, excluding primitive types
+            and common aliases like int, void, DWORD, etc.
+        """
         references = set()
         
         for pattern in self.type_patterns:
@@ -311,9 +322,21 @@ Return ONLY this JSON object:
         return references
     
     def get_reference_context(self, type_names: Set[str], max_types: int = 10) -> str:
-        """
-        Get definitions for referenced types.
-        Checks processed types first, falls back to raw.
+        """Get type definitions for referenced types to provide as LLM context.
+
+        Looks up each referenced type in the database, preferring processed
+        (modernized) headers over raw decompiled code. Returns formatted
+        context strings suitable for inclusion in LLM prompts.
+
+        Args:
+            type_names: Set of type names to look up definitions for.
+            max_types: Maximum number of type definitions to include in the
+                context. Defaults to 10 to avoid exceeding token limits.
+
+        Returns:
+            A formatted string containing type definitions, with comments
+            indicating whether each type is modernized or raw decompiled code.
+            Returns empty string if no types are found.
         """
         context_parts = []
         included = 0
@@ -346,8 +369,20 @@ Return ONLY this JSON object:
         return "\n\n".join(context_parts)
     
     def get_parent_header_context(self, parent_class: Optional[str]) -> str:
-        """
-        Get the processed header of the parent class to provide as context.
+        """Get the processed header of the parent class for LLM context.
+
+        Retrieves the class definition for the parent class, preferring
+        the modernized processed header if available, falling back to
+        raw decompiled code.
+
+        Args:
+            parent_class: Name of the parent class to look up. Can be None
+                for global functions.
+
+        Returns:
+            A formatted string containing the parent class definition with
+            a comment header, or empty string if parent_class is None or
+            not found in the database.
         """
         if not parent_class:
             return ""
@@ -367,7 +402,25 @@ Return ONLY this JSON object:
 
     def build_prompt(self, method_definition: str, parent_class: Optional[str],
                      reference_context: str = "", analysis: str = "") -> str:
-        """Build the LLM prompt for function modernization"""
+        """Build the LLM prompt for function modernization.
+
+        Constructs a complete prompt including the method to modernize,
+        parent class context, referenced type definitions, and few-shot
+        examples for guiding the LLM.
+
+        Args:
+            method_definition: The raw decompiled C++ method code to modernize.
+            parent_class: Name of the class this method belongs to, or None
+                for global functions.
+            reference_context: Pre-formatted string of referenced type
+                definitions to include. Defaults to empty string.
+            analysis: Optional analysis string from prior class analysis.
+                Currently unused but reserved for future enhancements.
+
+        Returns:
+            A complete prompt string ready to send to the LLM, including
+            the method code, context, and few-shot examples.
+        """
         prompt = f"""Modernize this decompiled C++ function:
 
 ```cpp
@@ -398,9 +451,25 @@ Referenced Types (for context):
     
     
     def verify_logic(self, original: str, processed: str) -> Tuple[bool, str]:
-        """
-        Verify that processed code matches original logic.
-        Returns (equivalent, reason)
+        """Verify that modernized code preserves the original logic.
+
+        Sends both the original and processed code to the LLM for semantic
+        comparison. The LLM evaluates whether the core logic is preserved
+        while allowing acceptable changes like variable renaming, enum
+        substitution, and structural improvements.
+
+        Args:
+            original: The original decompiled C++ function code.
+            processed: The modernized C++ function code to verify.
+
+        Returns:
+            A tuple of (equivalent, reason) where:
+            - equivalent: True if the logic is preserved, False otherwise.
+            - reason: Empty string if equivalent, otherwise an explanation
+              of the logic differences detected.
+
+        Raises:
+            ValueError: If no LLM client is configured.
         """
         import json
         
@@ -425,16 +494,34 @@ Referenced Types (for context):
         return False, f"Failed to parse verification response: {response[:50]}..."
 
     def process_function(self, method_row: Tuple, save_to_db: bool = True, analysis: str = None) -> Optional[ProcessedFunction]:
-        """
-        Process a single function through the LLM pipeline.
-        
+        """Process a single function through the LLM modernization pipeline.
+
+        Takes a method from the database, gathers type context, sends it
+        through the LLM for modernization, verifies the output preserves
+        logic, and optionally stores the result.
+
+        The processing pipeline:
+        1. Extract type references from the function code
+        2. Gather context from referenced types and parent class
+        3. Build and send prompt to LLM
+        4. Verify the modernized code preserves logic (with retries)
+        5. Store result in database if requested
+
         Args:
-            method_row: Method row from database (id, name, full_name, definition, ...)
-            save_to_db: Whether to save the result to the database
-            analysis: Optional analysis string from class analysis
-            
+            method_row: Database row tuple containing method information in
+                format (id, name, full_name, definition, namespace, parent,
+                is_generic, is_ignored, offset, return_type, is_global).
+            save_to_db: Whether to persist the processed result to the
+                database. Defaults to True.
+            analysis: Optional JSON string from prior class analysis
+                containing referenced_types list for additional context.
+
         Returns:
-            ProcessedFunction object, or None if processing failed
+            ProcessedFunction object containing the modernized code and
+            metadata, or None if LLM processing failed.
+
+        Raises:
+            ValueError: If no LLM client is configured.
         """
         if not self.llm:
             raise ValueError("LLM client not set")
@@ -583,17 +670,23 @@ Please regenerate the function addressing the issues mentioned in the verificati
         
         return result
     
-    def process_class_methods(self, class_name: str, 
+    def process_class_methods(self, class_name: str,
                               save_to_db: bool = True) -> List[ProcessedFunction]:
-        """
-        Process all unprocessed methods for a given class.
-        
+        """Process all unprocessed methods for a given class.
+
+        Retrieves all methods belonging to the specified class that have
+        not yet been processed, and runs each through the LLM pipeline.
+        Methods are processed sequentially.
+
         Args:
-            class_name: Name of the class whose methods to process
-            save_to_db: Whether to save results to database
-            
+            class_name: Name of the class whose methods should be processed.
+                Must match the parent field in the methods table.
+            save_to_db: Whether to persist processed results to the database.
+                Defaults to True.
+
         Returns:
-            List of ProcessedFunction objects
+            List of ProcessedFunction objects for successfully processed
+            methods. Methods that fail processing are not included.
         """
         # Get unprocessed methods for this class
         methods = self.db.get_unprocessed_methods(parent_class=class_name)
@@ -632,17 +725,29 @@ Please regenerate the function addressing the issues mentioned in the verificati
     
     def write_source_file(self, class_name: str, functions: List[ProcessedFunction],
                           output_dir: Path, namespace: str = None) -> Path:
-        """
-        Write processed functions to a source file.
-        
+        """Write processed functions to a C++ source file.
+
+        Generates a .cpp file containing all the processed function
+        implementations for a class. The file is organized with proper
+        includes and offset comments for each function.
+
+        The output path follows the pattern:
+        - With namespace: output_dir/src/{namespace}/{class_name}.cpp
+        - Without namespace: output_dir/src/{class_name}.cpp
+
         Args:
-            class_name: Name of the class
-            functions: List of processed functions
-            output_dir: Base output directory
-            namespace: Optional namespace for subdirectory organization
-            
+            class_name: Name of the class, used for the filename and
+                include directive.
+            functions: List of ProcessedFunction objects to write.
+                Each function's processed_code and offset are included.
+            output_dir: Base output directory. A 'src' subdirectory will
+                be created if it doesn't exist.
+            namespace: Optional namespace for organizing output into
+                subdirectories. Namespace separators (::) are converted
+                to directory separators.
+
         Returns:
-            Path to the written file
+            Path to the written .cpp file.
         """
         # Build output path
         if namespace:

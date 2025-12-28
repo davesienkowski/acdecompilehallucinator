@@ -20,9 +20,23 @@ MAX_LLM_TOKENS = 131072
 
 
 class LLMClient:
-    """Simple LLM client using OpenAI-compatible API (e.g., LMStudio)"""
-    
+    """Simple LLM client using OpenAI-compatible API (e.g., LMStudio)."""
+
     def __init__(self, base_url: str = LM_STUDIO_URL, temperature: float = 0.2, cache: Optional[LLMCache] = None, db_handler=None):
+        """Initialize the OpenAI-compatible client.
+
+        Args:
+            base_url: Base URL for the LLM API endpoint. Defaults to LM Studio
+                local server at localhost:1234.
+            temperature: Sampling temperature for generation. Lower values
+                produce more deterministic outputs. Defaults to 0.2.
+            cache: Optional LLMCache instance for caching responses to avoid
+                redundant API calls.
+            db_handler: Optional DatabaseHandler for storing token usage metrics.
+
+        Raises:
+            ImportError: If the openai package is not installed.
+        """
         try:
             from openai import OpenAI
             self.client = OpenAI(base_url=base_url, api_key="lm-studio")
@@ -33,7 +47,21 @@ class LLMClient:
             raise ImportError("Please install openai: pip install openai")
     
     def generate(self, prompt: str, max_tokens: int = MAX_LLM_TOKENS) -> str:
-        """Generate response from LLM, checking cache first"""
+        """Generate a response from the LLM, checking cache first.
+
+        Sends the prompt to the LLM API and returns the generated response.
+        If a cache is configured, checks for a cached response before making
+        the API call. Token usage is logged and optionally stored in the database.
+
+        Args:
+            prompt: The input prompt to send to the LLM.
+            max_tokens: Maximum number of tokens for the response. Defaults to
+                MAX_LLM_TOKENS (131072).
+
+        Returns:
+            The generated text response from the LLM, or an empty string if
+            no response was generated.
+        """
         # Check cache
         if self.cache:
             cached = self.cache.get(prompt)
@@ -88,5 +116,15 @@ class LLMClient:
         return result
     
     def __call__(self, prompt: str) -> str:
-        """Allow using client as callable"""
+        """Allow using the client instance as a callable.
+
+        Provides a convenient shorthand for calling generate() directly
+        on the client instance.
+
+        Args:
+            prompt: The input prompt to send to the LLM.
+
+        Returns:
+            The generated text response from the LLM.
+        """
         return self.generate(prompt)
