@@ -416,20 +416,20 @@ def process_class(self, class_name: str) -> None:
 
 ---
 
-### Stream C: Claude Code Skills (Future Phase)
+### Stream C: Claude Code Skills (Complete)
 
 **Goal**: Create Claude Code skills that the ClaudeCodeEngine invokes.
 
 ```
-skills/
-├── modernize-class.md      # Header generation with few-shot examples
-├── modernize-method.md     # Method modernization with verification
-├── verify-logic.md         # Equivalence checking
-├── analyze-deps.md         # Dependency graph using Serena
-└── process-batch.md        # Parallel processing orchestration
+.claude/skills/
+├── modernize-class/SKILL.md    # Header generation with few-shot examples
+├── modernize-method/SKILL.md   # Method modernization with verification
+├── verify-logic/SKILL.md       # Equivalence checking
+├── analyze-deps/SKILL.md       # Dependency graph using Serena
+└── process-batch/SKILL.md      # Parallel processing orchestration
 ```
 
-Skills will be developed after the engine abstraction is complete.
+Skills are project-shared and available to all team members.
 
 ---
 
@@ -453,18 +453,19 @@ Skills will be developed after the engine abstraction is complete.
 - [x] Add engine tracking to `processed_*` tables (engine_used column)
 - [x] Ensure backward compatibility with existing database (migration with defaults)
 
-### Phase 2: Legacy Refactoring (Parallel)
+### Phase 2: Legacy Refactoring (In Progress)
 
-- [ ] Add type hints to high-priority modules
+- [x] Add type hints to high-priority modules (db_handler, header_parser, source_parser)
+- [x] Remove duplicate methods from db_handler.py
 - [ ] Add docstrings to all public functions
 - [ ] Implement proper exception hierarchy
 - [ ] Add structured logging
 - [ ] Write unit tests for critical paths
 
-### Phase 3: Claude Code Engine
+### Phase 3: Claude Code Engine (Complete)
 
-- [ ] Create Claude Code skills
-- [ ] Implement `engines/claude_code.py`
+- [x] Create Claude Code skills (5 skills in .claude/skills/)
+- [x] Implement `engines/claude_code.py` (stub with CLI subprocess support)
 - [ ] Test with sample classes
 - [ ] Compare output quality vs LM Studio
 
