@@ -15,8 +15,8 @@ class DatabaseHandler:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
     
-    def init_db(self):
-        """Initialize the database with the required table structure"""
+    def init_db(self) -> None:
+        """Initialize the database with the required table structure."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row  # Enable dict-like access
             cursor = conn.cursor()
@@ -153,8 +153,8 @@ class DatabaseHandler:
             
             conn.commit()
     
-    def store_enum(self, enum: Enum):
-        """Store an enum in the database"""
+    def store_enum(self, enum: Enum) -> None:
+        """Store an enum in the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -172,8 +172,8 @@ class DatabaseHandler:
             
             conn.commit()
     
-    def store_struct(self, struct: Struct, vtable_code: Optional[str] = None):
-        """Store a struct in the database, with optional vtable code"""
+    def store_struct(self, struct: Struct, vtable_code: Optional[str] = None) -> None:
+        """Store a struct in the database, with optional vtable code."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -195,29 +195,8 @@ class DatabaseHandler:
             
             conn.commit()
     
-    def get_all_types(self):
-        """Retrieve all stored types from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types ORDER BY type, name')
-            return cursor.fetchall()
-    
-    def get_enums(self):
-        """Retrieve all stored enums from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types WHERE type = "enum" ORDER BY name')
-            return cursor.fetchall()
-    
-    def get_structs(self):
-        """Retrieve all stored structs from the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT * FROM types WHERE type = "struct" ORDER BY name')
-            return cursor.fetchall()
-    
-    def store_method(self, method: Method):
-        """Store a method in the database"""
+    def store_method(self, method: Method) -> None:
+        """Store a method in the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
@@ -243,29 +222,29 @@ class DatabaseHandler:
             
             conn.commit()
 
-    def get_all_types(self):
-        """Retrieve all stored types from the database"""
+    def get_all_types(self) -> List[Tuple]:
+        """Retrieve all stored types from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM types ORDER BY type, name')
             return cursor.fetchall()
     
-    def get_enums(self):
-        """Retrieve all stored enums from the database"""
+    def get_enums(self) -> List[Tuple]:
+        """Retrieve all stored enums from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM types WHERE type = "enum" ORDER BY name')
             return cursor.fetchall()
     
-    def get_structs(self):
-        """Retrieve all stored structs from the database"""
+    def get_structs(self) -> List[Tuple]:
+        """Retrieve all stored structs from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM types WHERE type = "struct" ORDER BY name')
             return cursor.fetchall()
     
-    def get_methods(self):
-        """Retrieve all stored methods from the database"""
+    def get_methods(self) -> List[Tuple]:
+        """Retrieve all stored methods from the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM methods ORDER BY name')
@@ -283,15 +262,15 @@ class DatabaseHandler:
             
             return cursor.fetchall()
     
-    def get_method_by_name(self, name: str):
-        """Retrieve a specific method by name"""
+    def get_method_by_name(self, name: str) -> List[Tuple]:
+        """Retrieve a specific method by name."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM methods WHERE name = ? ORDER BY name', (name,))
             return cursor.fetchall()
     
-    def get_method_by_full_name(self, full_name: str):
-        """Retrieve a specific method by full name"""
+    def get_method_by_full_name(self, full_name: str) -> List[Tuple]:
+        """Retrieve a specific method by full name."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM methods WHERE full_name = ? ORDER BY name', (full_name,))

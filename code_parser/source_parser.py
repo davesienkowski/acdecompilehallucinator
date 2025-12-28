@@ -31,8 +31,8 @@ class SourceParser:
                 continue
         return raw.decode('utf-8', errors='replace')
     
-    def parse(self):
-        """Main parsing method"""
+    def parse(self) -> None:
+        """Main parsing method."""
         content = self.read_file_safely()
         lines = content.splitlines()
         i = 0
@@ -68,7 +68,7 @@ class SourceParser:
             i += 1
         print("Found", found_funcs, "funcs")
     
-    def print_stats(self):
-        """Print statistics about parsed types"""
+    def print_stats(self) -> None:
+        """Print statistics about parsed types."""
         print(f"Global Methods found: {self.stats['global_methods_found'] - self.stats['global_methods_ignored']} (ignored: {self.stats['global_methods_ignored']})")
         print(f"Class Methods found: {self.stats['class_methods_found'] - self.stats['class_methods_ignored']} (ignored: {self.stats['class_methods_ignored']})")

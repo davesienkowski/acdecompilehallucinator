@@ -41,8 +41,8 @@ class HeaderParser:
         self.stats['typedefs_found'] += 1
         return i
     
-    def parse(self):
-        """Main parsing method"""
+    def parse(self) -> None:
+        """Main parsing method."""
         content = self.read_file_safely()
         lines = content.splitlines()
         i = 0
@@ -108,8 +108,8 @@ class HeaderParser:
                 print("Failed to match:", line)
             i += 1
     
-    def print_stats(self):
-        """Print statistics about parsed types"""
+    def print_stats(self) -> None:
+        """Print statistics about parsed types."""
         print(f"Structs found: {self.stats['structs_found'] - self.stats['structs_ignored']} (ignored: {self.stats['structs_ignored']})")
         print(f"Enums found: {self.stats['enums_found'] - self.stats['enums_ignored']} (ignored: {self.stats['enums_ignored']})")
         print(f"Typedefs found: {self.stats['typedefs_found']}")
