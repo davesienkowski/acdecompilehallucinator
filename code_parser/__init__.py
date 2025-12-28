@@ -17,6 +17,7 @@ from .constant_replacer import ConstantReplacer
 from .llm_cache import LLMCache
 from .llm_client import LLMClient
 from .llm_processor import LLMProcessor
+from .type_resolver import TypeResolver
 from .exceptions import (
     ACDecompileError,
     ParsingError, HeaderParsingError, SourceParsingError,
@@ -37,7 +38,7 @@ __all__ = [
     'HeaderParser', 'TypeWriter', 'Struct', 'Enum', 'Method',
     'DatabaseHandler', 'DependencyAnalyzer', 'ClassHeaderGenerator',
     'FunctionProcessor', 'ClassAssembler', 'ConstantsParser',
-    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor',
+    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor', 'TypeResolver',
     # Exceptions
     'ACDecompileError',
     'ParsingError', 'HeaderParsingError', 'SourceParsingError',
