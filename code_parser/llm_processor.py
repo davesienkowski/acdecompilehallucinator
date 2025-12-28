@@ -149,7 +149,7 @@ class LLMProcessor:
     def llm_client(self) -> LLMClient:
         """Lazy-load LLM client"""
         if self._llm_client is None:
-            self._llm_client = LLMClient(cache=self.cache)
+            self._llm_client = LLMClient(cache=self.cache, db_handler=self.db)
         return self._llm_client
     
     @property

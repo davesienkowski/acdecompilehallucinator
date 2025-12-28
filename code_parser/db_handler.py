@@ -90,6 +90,20 @@ class DatabaseHandler:
                 )
             ''')
             
+            # Create llm_token_usage table to track token usage
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS llm_token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prompt TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
+                    total_tokens INTEGER,
+                    model TEXT,
+                    request_time REAL,  -- Time in seconds for the request
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
             # Migration: Add offset column if it doesn't exist
             try:
                 cursor.execute("ALTER TABLE processed_methods ADD COLUMN offset TEXT")
@@ -597,3 +611,14 @@ class DatabaseHandler:
             cursor.execute('SELECT * FROM debug_types WHERE id = ?', (type_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def store_token_usage(self, prompt: str, prompt_tokens: int, completion_tokens: int, total_tokens: int, model: str = "local-model", request_time: float = None):
+        """Store LLM token usage in the database"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO llm_token_usage
+                (prompt, prompt_tokens, completion_tokens, total_tokens, model, request_time)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (prompt, prompt_tokens, completion_tokens, total_tokens, model, request_time))
+            conn.commit()

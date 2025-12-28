@@ -7,6 +7,7 @@ Simple LLM client using OpenAI-compatible API (e.g., LMStudio)
 """
 
 import logging
+import time
 from typing import Optional
 
 from code_parser.llm_cache import LLMCache
@@ -21,12 +22,13 @@ MAX_LLM_TOKENS = 131072
 class LLMClient:
     """Simple LLM client using OpenAI-compatible API (e.g., LMStudio)"""
     
-    def __init__(self, base_url: str = LM_STUDIO_URL, temperature: float = 0.2, cache: Optional[LLMCache] = None):
+    def __init__(self, base_url: str = LM_STUDIO_URL, temperature: float = 0.2, cache: Optional[LLMCache] = None, db_handler=None):
         try:
             from openai import OpenAI
             self.client = OpenAI(base_url=base_url, api_key="lm-studio")
             self.temperature = temperature
             self.cache = cache
+            self.db_handler = db_handler
         except ImportError:
             raise ImportError("Please install openai: pip install openai")
     
@@ -37,8 +39,12 @@ class LLMClient:
             cached = self.cache.get(prompt)
             if cached:
                 logger.info("Cache hit! Using stored response.")
+                # For cached responses, we don't track timing since no actual LLM call was made
                 return cached
 
+        # Record start time
+        start_time = time.time()
+        
         response = self.client.chat.completions.create(
             model="local-model",
             messages=[
@@ -47,8 +53,11 @@ class LLMClient:
             ],
             temperature=self.temperature,
             max_tokens=max_tokens,
-            timeout=300
+            timeout=3000
         )
+        
+        # Calculate request time
+        request_time = time.time() - start_time
         
         result = response.choices[0].message.content or ""
 
@@ -60,6 +69,21 @@ class LLMClient:
         if hasattr(response, 'usage'):
             u = response.usage
             logger.debug(f"Tokens: {u.prompt_tokens}↑ + {u.completion_tokens}↓ = {u.total_tokens}")
+            logger.debug(f"Request time: {request_time:.2f} seconds")
+            
+            # Store token usage in database if available
+            if self.db_handler:
+                try:
+                    self.db_handler.store_token_usage(
+                        prompt=prompt,
+                        prompt_tokens=u.prompt_tokens,
+                        completion_tokens=u.completion_tokens,
+                        total_tokens=u.total_tokens,
+                        model=response.model if hasattr(response, 'model') else "local-model",
+                        request_time=request_time
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to store token usage in database: {e}")
         
         return result
     
