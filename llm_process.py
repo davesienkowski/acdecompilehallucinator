@@ -271,6 +271,9 @@ class LLMProcessor:
     
     def process_enum(self, enum_name: str, pbar: Optional[tqdm] = None) -> Optional[Path]:
         """Process an enum (copy to header, no LLM needed)"""
+        import time
+        start_time = time.time()
+        
         # Get enum from database
         enums = self.db.get_type_by_name(enum_name, 'enum')
         if not enums:
@@ -282,7 +285,47 @@ class LLMProcessor:
         
         if self.dry_run:
             logger.info(f"[DRY-RUN] Would copy enum: {enum_name}")
-            return None
+            
+            # Create placeholder header file for enum in dry run mode
+            header_path = self.get_header_path(enum_name)
+            header_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use the same logic as get_header_path to determine namespace and simple name for enums
+            effective_name = enum_name
+            if self.header_generator.is_template_instantiation(enum_name):
+                effective_name = self.header_generator.get_template_base_name(enum_name)
+            
+            owner = self.get_file_owner(effective_name)
+            namespace, simple_name = split_namespace(owner)
+            
+            if namespace:
+                enum_content = f"""#pragma once
+ #include <cstdint>
+
+ namespace {namespace} {{
+     // Placeholder enum definition for {enum_name}
+     // This is a dry run placeholder
+     enum class {simple_name} {{
+         // TODO: Define enum values
+     }};
+ }} // namespace {namespace}
+ """
+            else:
+                enum_content = f"""#pragma once
+ #include <cstdint>
+
+ // Placeholder enum definition for {simple_name}
+ // This is a dry run placeholder
+ enum class {simple_name} {{
+     // TODO: Define enum values
+ }};
+ """
+            
+            with open(header_path, 'w') as f:
+                f.write(enum_content)
+            
+            logger.info(f"[DRY-RUN] Created placeholder enum header: {header_path}")
+            return header_path
         
         # Check if already exists
         header_path = self.get_header_path(enum_name)
@@ -291,16 +334,29 @@ class LLMProcessor:
             return header_path
 
         # Write enum header
-        namespace, simple_name = split_namespace(enum_name)
+        # Use the same logic as get_header_path to determine namespace and simple name
+        effective_name = enum_name
+        if self.header_generator.is_template_instantiation(enum_name):
+            effective_name = self.header_generator.get_template_base_name(enum_name)
+        
+        owner = self.get_file_owner(effective_name)
+        namespace_write, simple_name_write = split_namespace(owner)
         path = self.assembler.write_enum_header(
-            simple_name, 
+            simple_name_write,
             enum_code,
-            namespace=namespace
+            namespace=namespace_write
         )
         if path:
             logger.info(f"✓ Enum: {enum_name} → {path.name}")
             if pbar:
                 pbar.update(1)
+            
+            # Record successful enum processing time
+            elapsed = time.time() - start_time
+            if hasattr(self, '_successful_enum_times'):
+                self._successful_enum_times.append(elapsed)
+            else:
+                self._successful_enum_times = [elapsed]
         
         return path
 
@@ -362,6 +418,137 @@ class LLMProcessor:
         if self.dry_run:
             methods = self.db.get_methods_by_parent(class_name)
             logger.info(f"[DRY-RUN] Would process: {class_name} ({len(methods)} methods)")
+            
+            # Create placeholder header and cpp files in dry run mode
+            header_path = self.get_header_path(class_name)
+            source_path = self.get_source_path(class_name)
+            
+            # Create header file with class name
+            # For templates, make sure we create the correct directory structure
+            header_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use the same logic as get_header_path to determine namespace and simple name
+            effective_name = class_name
+            if self.header_generator.is_template_instantiation(class_name):
+                effective_name = self.header_generator.get_template_base_name(class_name)
+            
+            owner = self.get_file_owner(effective_name)
+            namespace, simple_name = split_namespace(owner)
+            
+            if namespace:
+                header_content = f"""#pragma once
+ #include <cstdint>
+ 
+ namespace {namespace} {{
+     class {simple_name} {{
+     public:
+         // Placeholder class definition for {class_name}
+         // This is a dry run placeholder
+     }};
+ }} // namespace {namespace}
+ """
+            else:
+                header_content = f"""#pragma once
+ #include <cstdint>
+ 
+ class {simple_name} {{
+ public:
+     // Placeholder class definition for {simple_name}
+     // This is a dry run placeholder
+ }};
+ """
+            
+            with open(header_path, 'w') as f:
+                f.write(header_content)
+            
+            logger.info(f"[DRY-RUN] Created placeholder header: {header_path}")
+            
+            # Create cpp file with class and method names if there are methods
+            if methods:
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Use the same logic as above for consistent namespace handling
+                effective_name_source = class_name
+                if self.header_generator.is_template_instantiation(class_name):
+                    effective_name_source = self.header_generator.get_template_base_name(class_name)
+                
+                owner_source = self.get_file_owner(effective_name_source)
+                namespace_source, simple_name_source = split_namespace(owner_source)
+                
+                if namespace_source:
+                    cpp_content = f"""#include "{header_path.name}"
+#include <iostream>
+
+// Placeholder method implementations for {class_name}
+"""
+                    for method in methods:
+                        # Method structure from database: [id, name, parent_class, ...]
+                        method_name = method[1] if len(method) > 1 else "unknown_method"
+                        
+                        # Check if simple_name contains template parameters (e.g., "PStringBase<char>")
+                        # If it does, we need to define the method differently to avoid invalid C++ syntax
+                        if '<' in simple_name_source and '>' in simple_name_source:
+                            # For template classes, we can't implement methods this way
+                            # Instead, we'll just document the method
+                            cpp_content += f"""// Method: {method_name}
+// Note: {simple_name_source} is a template class - method {method_name} would normally be defined inline or in a specialized way
+// void {namespace_source}::{simple_name_source}::{method_name}() {{
+//     // TODO: Implement {method_name}
+//     // Placeholder for method {method_name}
+// }}
+
+"""
+                        else:
+                            # Regular class, standard method implementation
+                            cpp_content += f"""// Method: {method_name}
+void {namespace_source}::{simple_name_source}::{method_name}() {{
+    // TODO: Implement {method_name}
+    // Placeholder for method {method_name}
+}}
+
+"""
+                else:
+                    cpp_content = f"""#include "{header_path.name}"
+#include <iostream>
+
+// Placeholder method implementations for {simple_name_source}
+"""
+                    for method in methods:
+                        # Method structure from database: [id, name, parent_class, ...]
+                        method_name = method[1] if len(method) > 1 else "unknown_method"
+                        
+                        # Check if simple_name contains template parameters (e.g., "PStringBase<char>")
+                        # If it does, we need to define the method differently to avoid invalid C++ syntax
+                        if '<' in simple_name_source and '>' in simple_name_source:
+                            # For template classes, we can't implement methods this way
+                            # Instead, we'll just document the method
+                            cpp_content += f"""// Method: {method_name}
+// Note: {simple_name_source} is a template class - method {method_name} would normally be defined inline or in a specialized way
+// void {simple_name_source}::{method_name}() {{
+//     // TODO: Implement {method_name}
+//     // Placeholder for method {method_name}
+// }}
+
+"""
+                        else:
+                            # Regular class, standard method implementation
+                            cpp_content += f"""// Method: {method_name}
+void {simple_name_source}::{method_name}() {{
+    // TODO: Implement {method_name}
+    // Placeholder for method {method_name}
+}}
+
+"""
+                
+                with open(source_path, 'w') as f:
+                    f.write(cpp_content)
+                
+                logger.info(f"[DRY-RUN] Created placeholder source: {source_path}")
+            
+            result["header_path"] = header_path
+            result["source_path"] = source_path if methods else None
+            result["method_count"] = len(methods)
+            
             return result
         
         logger.info(f"┌─ Processing: {class_name}")
@@ -396,6 +583,8 @@ class LLMProcessor:
             # Step 0: Analysis
             logger.info(f"│  └─ Analyzing class...")
             try:
+                import time
+                start_time = time.time()
                 analysis_result = self.header_generator.analyze_class(class_name)
                 if analysis_result:
                     logger.info(f"│  └─ ✓ Analysis complete")
@@ -406,6 +595,14 @@ class LLMProcessor:
                         analysis = analysis_data.get("analysis", "")
                         extracted_types = analysis_data.get("referenced_types", [])
                         logger.info(f"│  └─ Found {len(extracted_types)} referenced types from analysis")
+                        
+                        # Record successful analysis time
+                        elapsed = time.time() - start_time
+                        if hasattr(self, '_successful_analysis_times'):
+                            self._successful_analysis_times.append(elapsed)
+                        else:
+                            self._successful_analysis_times = [elapsed]
+                            
                     except json.JSONDecodeError:
                         # If JSON parsing fails, use the original analysis
                         analysis = analysis_result
@@ -419,19 +616,35 @@ class LLMProcessor:
             logger.info(f"│  └─ Generating header...")
             
             try:
+                import time
+                start_time = time.time()
                 header_code = self.header_generator.generate_header(class_name, save_to_db=True, analysis=analysis)
                 if header_code:
                     header_code = clean_llm_output(header_code)
-                    namespace, simple_name = split_namespace(class_name)
+                    # Use the same logic as get_header_path to determine namespace and simple name
+                    effective_name = class_name
+                    if self.header_generator.is_template_instantiation(class_name):
+                        effective_name = self.header_generator.get_template_base_name(class_name)
+                    
+                    owner = self.get_file_owner(effective_name)
+                    namespace_write, simple_name_write = split_namespace(owner)
                     result["header_path"] = self.assembler.write_header_file(
-                        simple_name,
+                        simple_name_write,
                         header_code,
-                        namespace=namespace,
+                        namespace=namespace_write,
                         path=header_path
                     )
                     logger.info(f"│  └─ ✓ Header saved")
                     if pbar:
                         pbar.update(1)
+                    
+                    # Record successful header generation time
+                    elapsed = time.time() - start_time
+                    if hasattr(self, '_successful_header_times'):
+                        self._successful_header_times.append(elapsed)
+                    else:
+                        self._successful_header_times = [elapsed]
+                        
                 else:
                     logger.warning(f"│  └─ ✗ Header generation failed")
             except Exception as e:
@@ -471,11 +684,21 @@ class LLMProcessor:
             method_name = method[1]
             
             try:
+                import time
+                start_time = time.time()
                 logger.info(f"│     └─ {method_name}...")
                 self.function_processor.process_function(method, save_to_db=True, analysis=analysis)
                 result["method_count"] += 1
                 if pbar:
                     pbar.update(1)
+                
+                # Record successful method processing time
+                elapsed = time.time() - start_time
+                if hasattr(self, '_successful_method_times'):
+                    self._successful_method_times.append(elapsed)
+                else:
+                    self._successful_method_times = [elapsed]
+                
             except Exception as e:
                 logger.error(f"│     └─ ✗ {method_name}: {e}")
         
@@ -499,11 +722,17 @@ class LLMProcessor:
                     offset=pm.get('offset', '0')
                 ))
 
-            namespace, simple_name = split_namespace(class_name)
+            # Use the same logic as get_header_path to determine namespace and simple name
+            effective_name = class_name
+            if self.header_generator.is_template_instantiation(class_name):
+                effective_name = self.header_generator.get_template_base_name(class_name)
+            
+            owner = self.get_file_owner(effective_name)
+            namespace_write, simple_name_write = split_namespace(owner)
             result["source_path"] = self.assembler.write_source_file(
-                simple_name, 
+                simple_name_write,
                 processed_methods,
-                namespace=namespace
+                namespace=namespace_write
             )
             if result["source_path"]:
                 logger.info(f"│  └─ ✓ Source saved")
@@ -612,6 +841,15 @@ class LLMProcessor:
 
         logger.info(f"Processing {len(order)} types in dependency order...")
         
+        # Track successful operation times for averaging
+        successful_times = []
+        
+        # Initialize timing lists for different operations
+        self._successful_header_times = []
+        self._successful_method_times = []
+        self._successful_enum_times = []
+        self._successful_analysis_times = []
+        
         with tqdm(total=work_plan["total"], desc="Processing", unit="task") as pbar:
             for type_info in order:
                 name = type_info["name"]
@@ -623,6 +861,9 @@ class LLMProcessor:
                     
                 kind = type_info["kind"]
                 try:
+                    import time
+                    start_time = time.time()
+                    
                     if kind == "enum":
                         self.process_enum(name, pbar=pbar)
                         stats["enums_processed"] += 1
@@ -631,9 +872,41 @@ class LLMProcessor:
                         if result.get("header_path"):
                             stats["structs_processed"] += 1
                         stats["methods_processed"] += result.get("method_count", 0)
+                        
+                    # Record successful operation time
+                    elapsed = time.time() - start_time
+                    successful_times.append(elapsed)
+                
                 except Exception as e:
                     logger.error(f"Failed to process {name}: {e}")
                     stats["errors"].append({"name": name, "error": str(e)})
+                    
+                # Update tqdm description with custom ETA based on average time
+                # Combine all successful times (headers, methods, enums, analysis)
+                all_successful_times = successful_times.copy()
+                if hasattr(self, '_successful_header_times'):
+                    all_successful_times.extend(self._successful_header_times)
+                if hasattr(self, '_successful_method_times'):
+                    all_successful_times.extend(self._successful_method_times)
+                if hasattr(self, '_successful_enum_times'):
+                    all_successful_times.extend(self._successful_enum_times)
+                if hasattr(self, '_successful_analysis_times'):
+                    all_successful_times.extend(self._successful_analysis_times)
+                
+                if all_successful_times:
+                    avg_time = sum(all_successful_times) / len(all_successful_times)
+                    remaining_tasks = work_plan["total"] - pbar.n
+                    eta_seconds = avg_time * remaining_tasks
+                    
+                    # Convert to human-readable format
+                    if eta_seconds < 60:
+                        eta_str = f"{eta_seconds:.0f}s"
+                    elif eta_seconds < 3600:
+                        eta_str = f"{eta_seconds/60:.1f}m"
+                    else:
+                        eta_str = f"{eta_seconds/3600:.1f}h"
+                    
+                    pbar.set_postfix({"ETA avg": eta_str, "avg_time": f"{avg_time:.1f}s"})
         
         return stats
     
@@ -746,8 +1019,20 @@ Examples:
     )
     
     # Handle modes
-    if args.dry_run:
+    if args.dry_run and not args.single_class:
         processor.show_plan()
+        # In dry run mode, also process all classes to create placeholder files
+        logger.info("Processing all classes in dry run mode to create placeholder files...")
+        stats = processor.process_all()
+        print(f"\n{'='*60}")
+        print("Dry Run Complete - Placeholder files created")
+        print('='*60)
+        print(f"Enums processed:   {stats['enums_processed']}")
+        print(f"Structs processed: {stats['structs_processed']}")
+        print(f"Methods processed: {stats['methods_processed']}")
+        if stats['errors']:
+            print(f"Errors: {len(stats['errors'])}")
+        print('='*60 + "\n")
         return 0
     
     if args.single_class:

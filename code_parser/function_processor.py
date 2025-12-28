@@ -35,39 +35,149 @@ class FunctionProcessor:
     
     # Few-shot example for function modernization
     FEW_SHOT_FUNCTION = """
-Task: Modernize this decompiled C++ function to clean, idiomatic modern C++ (C++17+). Preserve ALL logic, and structure.
+Task: Modernize decompiled C++ functions to clean, idiomatic C++17+ code.
+Requirements:
 
-STRICT RULES:
-- Output ONLY the function code, no explanations, other classes, forward declarations, includes, etc.
-- Do not rename the function or parameters
-- Renaming local variables to improve readability is encouraged
-- Remove decompiler artifacts (__thiscall, explicit 'this' pointer, etc. )
-- Use modern types (uint32_t, bool instead of int for booleans)
-- Add comments to explain the logic / purpose of the function
-- Do not add or remove logic
-- Keep the function signature compatible with the class header
-- If you see enum values, use the enum name instead of the value
-- Do not make up constants that dont exist. 
-- Do your best to produce valid cpp code.
+Preserve ALL original logic and structure exactly
+Keep function names and parameters unchanged
+Rename local variables for clarity
+Remove decompiler artifacts (__thiscall, explicit this, etc.)
+Replace numeric literals with enum values where definitions exist
+Ensure code compiles and is valid C++
 
-Example Input:
-void __thiscall Player::Update(Player *this, float dt)
+Output Format:
+
+Function comment describing purpose
+Function body only
+NO includes, forward declarations, class definitions, or explanatory text
+
+Critical Constraint:
+Output ONLY the function comment and code body—nothing else.
+
+Example Input 1:
+int __cdecl LandDefs::get_dir(int ix, int iy)
 {
-    int v1 = this->_health;
-    if (v1 <= 0) {
-        this->_flags = this->_flags | 0x1;
+  int result; // eax
+
+  if ( ix >= 0 )
+  {
+    if ( ix <= 0 )
+    {
+      if ( iy >= 0 )
+        result = iy > 0;
+      else
+        result = 2;
+    }
+    else if ( iy >= 0 )
+    {
+      result = 4 * (iy > 0) + 3;
+    }
+    else
+    {
+      result = 8;
+    }
+  }
+  else if ( iy >= 0 )
+  {
+    result = (iy > 0) + 4;
+  }
+  else
+  {
+    result = 6;
+  }
+  return result;
+}
+
+Example Output 1:
+/*
+    Determines a direction index (0‑8) based on relative offsets ix and iy.
+    The mapping corresponds to the LandDefs::Direction enumeration
+*/
+int LandDefs::get_dir(int ix, int iy)
+{
+    if (ix >= 0) {
+        if (ix == 0) {                     // vertical axis
+            if (iy >= 0) {
+                return iy > 0 ? Direction::NORTH_OF_VIEWER : Direction::IN_VIEWER_BLOCK;
+            } else {
+                return Direction::SOUTH_OF_VIEWER;
+            }
+        } else {                            // ix > 0, east side
+            if (iy >= 0) {
+                return iy > 0 ? Direction::NORTHEAST_OF_VIEWER : Direction::EAST_OF_VIEWER;
+            } else {
+                return Direction::SOUTHEAST_OF_VIEWER;
+            }
+        }
+    } else {                                // ix < 0, west side
+        if (iy >= 0) {
+            return iy > 0 ? Direction::NORTHWEST_OF_VIEWER : Direction::WEST_OF_VIEWER;
+        } else {
+            return Direction::SOUTHWEST_OF_VIEWER;
+        }
     }
 }
 
-Example Output:
-/*
-    Updates the player's state.
-*/
-void Player::Update(float dt) {
-    if (_health <= 0) {
-        // Add dead flag
-        _flags |= 0x1;
+Example Input 2:
+void __thiscall CELLARRAY::add_cell(CELLARRAY *this, const unsigned int cell_id, const CObjCell *cell)
+{
+  CELLARRAY *v3; // esi
+  unsigned int v4; // edx
+  unsigned int v5; // eax
+  CELLINFO *v6; // ecx
+
+  v3 = this;
+  v4 = this->num_cells;
+  v5 = 0;
+  if ( v4 )
+  {
+    v6 = this->cells.data;
+    while ( cell_id != v6->cell_id )
+    {
+      ++v5;
+      ++v6;
+      if ( v5 >= v3->num_cells )
+        goto LABEL_5;
     }
+  }
+  else
+  {
+LABEL_5:
+    if ( v4 >= v3->cells.sizeOf )
+      DArray<CELLINFO>::grow(&v3->cells, v4 + 8);
+    v3->cells.data[v3->num_cells].cell_id = cell_id;
+    v3->cells.data[v3->num_cells++].cell = cell;
+  }
+}
+
+Example Output 2:
+/*
+ * Adds a new cell to the array if it does not already exist.
+ *
+ * The function first scans the current collection for an entry with the same
+ * `cell_id`.  If such an entry is found, the call is ignored.  Otherwise,
+ * it ensures that there is enough capacity in the underlying dynamic array
+ * and appends a new CELLINFO structure containing the supplied id and
+ * pointer.
+ */
+void CELLARRAY::add_cell(uint32_t cell_id, const CObjCell* cell)
+{
+    // Search for an existing entry with the same ID.
+    for (uint32_t i = 0; i < num_cells; ++i) {
+        if (cells.data[i].cell_id == cell_id) {
+            // Duplicate found – nothing to do.
+            return;
+        }
+    }
+
+    // Ensure there is space for a new element.
+    if (num_cells >= cells.sizeOf) {
+        DArray<CELLINFO>::grow(&cells, num_cells + 8);
+    }
+
+    // Append the new cell information.
+    cells.data[num_cells].cell_id = cell_id;
+    cells.data[num_cells++].cell   = cell;
 }
 """
 
@@ -83,18 +193,30 @@ ORIGINAL:
 MODERNIZED:
 ```cpp
 {processed}
-```
+```Task: Verify that the MODERNIZED version preserves the core logic and semantics of the ORIGINAL.
+Allowed Changes:
+- Local variable renaming for readability
+- Replacing inlined values with enums
+- Local type updates (e.g., int → bool)
+- Structure changes (e.g., early returns, loop refactoring)
+- Safety improvements (e.g., null checks, bounds checks)
 
-TASK:
-Determine if the MODERNIZED version preserves the core logic and semantics of the ORIGINAL.
-- Variable renaming is allowed if it improves readability (implied by "Modernize").
-- Type updates are allowed (e.g. int -> bool).
-- Structure changes are allowed (e.g. early returns).
-- Safety checks are allowed (e.g. null checks).
-- LOGIC must remain identical.
+Validation Criteria:
+- Core logic must remain identical
 
-RESPONSE:
-Return ONLY the JSON object:
+Output must contain ONLY:
+- Function comment
+- Function declaration/body
+
+
+Output must NOT contain:
+- Include statements
+- Class definitions
+- Forward declarations
+- Any other code or explanatory text. comments in the code are fine.
+
+Response Format:
+Return ONLY this JSON object:
 {{
   "equivalent": true/false,
   "reason": "Brief explanation if false, otherwise empty string"

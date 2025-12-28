@@ -32,7 +32,14 @@ class Struct:
     @property
     def safe_name(self) -> str:
         """Returns a filesystem-safe name"""
-        return self.full_name.replace('::', '__').replace('_vtbl', '')
+        # Replace problematic characters that can cause long filenames
+        safe_name = self.full_name.replace('::', '__').replace('_vtbl', '')
+        # Handle template characters that can cause extremely long names
+        safe_name = safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+        # Truncate if too long for filesystem limits
+        if len(safe_name) > 100:
+            safe_name = safe_name[:100]
+        return safe_name
     
     @property
     def simple_name(self) -> str:
@@ -67,16 +74,21 @@ class Struct:
     
     def get_out_file(self, src_path: str, structs_dict: Dict[str, any] = None) -> Path:
         """Return the output file path for this struct"""
+        # Clean the safe_name to handle template instantiations that result in very long names
+        safe_name_clean = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+        if len(safe_name_clean) > 100:
+            safe_name_clean = safe_name_clean[:100]
+        
         if self.namespace:
             # Check if namespace itself is a struct
             if structs_dict and self.namespace in structs_dict:
-                out_file = src_path / f"{self.safe_name.split('__')[0]}.cpp"
+                out_file = src_path / f"{safe_name_clean.split('__')[0]}.cpp"
             else:
                 namespace_dir = src_path / self.namespace.split('::')[0]
                 namespace_dir.mkdir(exist_ok=True)
-                out_file = namespace_dir / f"{self.safe_name.split('__')[-1]}.cpp"
+                out_file = namespace_dir / f"{safe_name_clean.split('__')[-1]}.cpp"
         else:
-            out_file = src_path / f"{self.safe_name}.cpp"
+            out_file = src_path / f"{safe_name_clean}.cpp"
         
         return out_file
 

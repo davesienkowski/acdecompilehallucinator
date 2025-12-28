@@ -26,7 +26,14 @@ class Method:
     @property
     def safe_name(self) -> str:
         """Returns a filesystem-safe name"""
-        return self.full_name.replace('::', '__').replace('_vtbl', '')
+        # Replace problematic characters that can cause long filenames
+        safe_name = self.full_name.replace('::', '__').replace('_vtbl', '')
+        # Handle template characters that can cause extremely long names
+        safe_name = safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+        # Truncate if too long for filesystem limits
+        if len(safe_name) > 100:
+            safe_name = safe_name[:100]
+        return safe_name
     
     @property
     def is_global(self) -> str:
@@ -44,17 +51,46 @@ class Method:
         return def_line
     
     def get_out_file(self, src_path: str, structs_dict: Dict[str, any] = None) -> Path:
-        """Return the output file path for this struct"""
-        if self.namespace:
-            # Check if namespace itself is a struct
-            if self.parent and self.parent in structs_dict:
-                out_file = structs_dict[self.parent].get_out_file(src_path, structs_dict)
-            else:
+        """Return the output file path for this method"""
+        # Use the parent class name for the file, not the full method name
+        # This prevents extremely long filenames with complex template instantiations
+        if self.parent and self.parent in structs_dict:
+            # If parent exists in structs_dict, use parent's get_out_file method
+            out_file = structs_dict[self.parent].get_out_file(src_path, structs_dict)
+        elif self.parent:
+            # Use parent class name for the file, not the full method name
+            # Clean the parent name to make it filesystem-safe
+            safe_parent = self.parent.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+            # Truncate if too long
+            if len(safe_parent) > 100:
+                safe_parent = safe_parent[:100]
+            
+            if self.namespace:
                 namespace_dir = src_path / self.namespace.split('::')[0]
                 namespace_dir.mkdir(exist_ok=True)
-                out_file = namespace_dir / f"{self.parent}.cpp"
+                out_file = namespace_dir / f"{safe_parent}.cpp"
+            else:
+                out_file = src_path / f"{safe_parent}.cpp"
+        elif self.namespace:
+            # Check if namespace itself is a struct
+            if structs_dict and self.namespace in structs_dict:
+                out_file = src_path / f"{self.safe_name.split('__')[0]}.cpp"
+            else:
+                # Clean namespace for filename
+                safe_namespace = self.namespace.replace('::', '__').replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+                # Truncate if too long
+                if len(safe_namespace) > 10:
+                    safe_namespace = safe_namespace[:100]
+                    
+                namespace_dir = src_path / self.namespace.split('::')[0]
+                namespace_dir.mkdir(exist_ok=True)
+                out_file = namespace_dir / f"{safe_namespace}.cpp"
         else:
-            out_file = src_path / f"{self.parent}.cpp"
+            # For global functions, use safe_name but truncate if needed
+            safe_name = self.safe_name.replace('<', '_').replace('>', '_').replace(',', '_').replace(' ', '_')
+            if len(safe_name) > 100:
+                safe_name = safe_name[:100]
+            out_file = src_path / f"{safe_name}.cpp"
         
         return out_file
 
@@ -137,7 +173,9 @@ class Method:
             self.namespace = "::".join(parts[:-1])
 
         self.name = self.name.replace("operatorGreaterThan", "operator>")
-        self.name = self.name.replace("VectorDeletingDestructor", "operator<")
+        self.name  = self.name.replace("operatorLessThan", "operator<")
+        self.name = self.name.replace('VectorDeletingDestructor', "`vector deleting destructor'")
+        self.name = self.name.replace('ScalarDeletingDestructor', "`scalar deleting destructor'")
 
         return self.simple_name, None
 
@@ -184,4 +222,7 @@ class Method:
         if self.parent and (should_ignore_class(self.parent) or self.parent.startswith('`')):
             self.is_ignored = True
         
+        if "DeletingDestructor" in self.name or 'deleting destructor' in self.name:
+            self.is_ignored = True
+
         return i, simple_name, self

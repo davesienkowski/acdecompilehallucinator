@@ -23,86 +23,194 @@ class ClassHeaderGenerator:
     
     # Few-shot examples
 
-    FEW_SHOT_CLASS = """
-Task: Generate only the C++ header file content for the given class. Include #pragma once, necessary #includes (minimal), class declaration with members, method prototypes, and documentation comments.
-- Forward declare or assume others are handled elsewhere. Use MCP tools if needed for base class or member types.
+    FEW_SHOT_CLASS = """Task: Generate a C++ header file for the given class.
 
-STRICT RULES:
-- Output ONLY code, no explanations
-- Do not rename classes or method names.
-- For referenced types, use the path provided in the "// Defined in:" comment for the #include directive.
-- Remove all forward declarations.
-- do not change any existing types unless they are void/undefined/etc. if a type is defined leave it
-- make sure to keep all existing methods in place, do not invent new methods.
-- Absolutely NEVER define base or referenced types, and DO NOT forward declare them.
-- You can add code comments.
-- DO NOT inline function definitions.
-- You can clean up destructor method signatures to become valid cpp.
-- Do your best to produce valid cpp code.
+Required Elements:
+- #pragma once
+- Minimal necessary #includes
+- Class declaration with all members and methods
+- Documentation comments
 
-Example Input:
-struct __cppobj Player : GameObject
-{
-    int _health;
-    void Update(float dt);
+Output Requirements:
+- Output ONLY the header file code with no explanations
+- Preserve all original class names, method names, and type definitions exactly as provided
+- Keep all existing methods; do not add or remove any
+- Add descriptive code comments for clarity
+- Produce valid C++ syntax
+
+Include Directives:
+- For referenced types with "// Defined in:" comments, use that path for the #include
+- Remove all forward declarations
+
+Type Handling:
+- Never modify existing defined types
+- Never define or forward-declare base classes or referenced types
+- Assume base classes and member types are handled elsewhere
+
+Method Handling:
+- Never inline function definitions
+- Clean up destructor signatures to valid C++ syntax
+- Skip compiler-generated methods (e.g., vector/scalar deleting destructors)
+
+Virtual Table Handling:
+- When a struct has a separate vtbl struct, merge the virtual methods into the main class
+- Convert vtbl function pointers to virtual method declarations
+- Remove __thiscall calling convention and "this" parameter
+
+Example:
+
+Input:
+struct __cppobj Archive {
+    Archive_vtbl *__vftable /*VFT*/;
+    unsigned int m_flags;
+    TResult m_hrError;
+    SmartBuffer m_buffer;
+    unsigned int m_currOffset;
+    HashTable<unsigned long, Interface *, 0> *m_pcUserDataHash;
+    IArchiveVersionStack *m_pVersionStack;
 };
 
-Example Output:
+struct /*VFT*/ Archive_vtbl {
+    void (__thiscall *InitForPacking)(Archive *this, const ArchiveInitializer *, const SmartBuffer *);
+    void (__thiscall *InitForUnpacking)(Archive *this, const ArchiveInitializer *, const SmartBuffer *);
+    void (__thiscall *SetCheckpointing)(Archive *this, bool);
+    void (__thiscall *InitVersionStack)(Archive *this);
+    void (__thiscall *CreateVersionStack)(Archive *this);
+};
+
+Output:
 #pragma once
-#include "GameObject.h"
 
-/*
-  Represents a player entity inheriting from GameObject, handling health management and status flags.
-*/
-class Player : public GameObject {
+#include "ArchiveInitializer.h"
+#include "SmartBuffer.h"
+#include "TResult.h"
+#include "HashTable.h"
+#include "Interface.h"
+#include "IArchiveVersionStack.h"
+
+/**
+ * Archive class for serialization and deserialization operations.
+ * Manages packing/unpacking of data with version control and checkpointing support.
+ */
+class Archive {
 public:
-    // Health of the player
-    int _health;
+    // Virtual methods
+    virtual void InitForPacking(const ArchiveInitializer *initializer, const SmartBuffer *buffer);
+    virtual void InitForUnpacking(const ArchiveInitializer *initializer, const SmartBuffer *buffer);
+    virtual void SetCheckpointing(bool enabled);
+    virtual void InitVersionStack();
+    virtual void CreateVersionStack();
 
-    // Update the player
-    void Update(float dt);
+    // Member variables
+    unsigned int m_flags;
+    TResult m_hrError;
+    SmartBuffer m_buffer;
+    unsigned int m_currOffset;
+    HashTable<unsigned long, Interface *, 0> *m_pcUserDataHash;
+    IArchiveVersionStack *m_pVersionStack;
 };
 """
 
-    FEW_SHOT_TEMPLATE = """
-Task: Generate only the C++ header file content for the given template. Include #pragma once, necessary #includes (minimal), template declaration with members, and full method definitions.
-- If the class name contains template parameters (e.g., List<int>), generate a generic template instead (e.g., template <typename T> class List).
-- Use `template <typename T>` for single parameter templates, or `template <typename T, typename U>` for multiple.
+    FEW_SHOT_TEMPLATE = """Task: Generate a C++ header file for the given template class.
 
-STRICT RULES:
-- Output ONLY code, no explanations
-- Do not rename classes or method names (except to parameterize them in templates).
-- For referenced types, use the path provided in the "// Defined in:" comment for the #include directive.
-- do not change any existing types unless they are void/undefined/etc. if a type is defined leave it
-- make sure to keep all existing methods in place, do not invent new methods.
-- Absolutely NEVER define base or referenced types, and DO NOT forward declare them.
-- For templates, ALWAYS provide full function definitions inside the class or immediately after it in the header.
-- For templates, convert the struct to a templated class.
-- You can clean up destructor method signatures to become valid cpp.
-- Do your best to produce valid cpp code.
-Example Input:
+Required Elements:
+- #pragma once
+- Minimal necessary #includes
+- Template declaration with all members
+- Full inline method definitions (required for templates)
+- Documentation comments
+
+Template Parameterization:
+- Convert concrete template instantiations to generic templates
+  - Example: List<int> → template <typename T> class List
+- Use `template <typename T>` for single-type parameters
+- Use `template <typename T, typename U, ...>` for multiple type parameters
+- Use `template <typename T, size_t N>` for non-type parameters when appropriate
+- Preserve any non-type template parameters from the original
+
+Output Requirements:
+- Output ONLY the header file code with no explanations
+- Preserve all original method names and signatures
+- Replace concrete types with template parameters where applicable
+- Keep all existing methods; do not add or remove any
+- Add descriptive code comments for clarity
+- Produce valid C++ syntax
+
+Include Directives:
+- For referenced types with "// Defined in:" comments, use that path for the #include
+- Do not forward-declare types
+
+Type Handling:
+- Replace concrete template types (e.g., int in List<int>) with template parameters (T)
+- Preserve non-template member types unless they're void/undefined
+- Never define or forward-declare base classes or referenced types
+- Assume external types are handled elsewhere
+
+Method Handling:
+- Provide full inline definitions for all template methods (inside class body or immediately after)
+- Never leave template method declarations without definitions
+- Convert struct to class for templates
+- Clean up destructor signatures to valid C++ syntax
+- Skip compiler-generated methods (e.g., vector/scalar deleting destructors)
+
+Example:
+
+Input:
 class List<int> {
 public:
     int* _items;
+    int _count;
+    int _capacity;
     void Add(int item);
+    int Get(int index);
 };
 
-// Method Definition:
+// Method definitions:
 void List<int>::Add(int item) {
+    if (_count >= _capacity) Resize();
     _items[_count++] = item;
 }
 
-Example Output:
+int List<int>::Get(int index) {
+    return _items[index];
+}
+
+Output:
 #pragma once
 
+/**
+ * Generic list container for storing elements of type T.
+ * Provides dynamic array functionality with automatic resizing.
+ */
 template <typename T>
 class List {
 public:
+    // Pointer to the underlying array of items
     T* _items;
-
+    
+    // Current number of items in the list
+    int _count;
+    
+    // Current allocated capacity
+    int _capacity;
+    
+    /**
+     * Adds an item to the list, resizing if necessary.
+     */
     void Add(T item) {
+        if (_count >= _capacity) Resize();
         _items[_count++] = item;
     }
+    
+    /**
+     * Gets the item at the specified index.
+     */
+    T Get(int index) {
+        return _items[index];
+    }
+
+private:
+    void Resize();
 };
 """
     
@@ -341,24 +449,44 @@ Methods:
                 if nt_sigs:
                     prompt += "Methods:\n" + "\n".join(nt_sigs) + "\n"
 
-        prompt += """
-Task: Extract ALL type names referenced in the code. These include:
+        prompt += """Task: Extract all type names referenced in the provided code.
+
+Include:
 - Base class names
 - Member variable types
-- Method parameter types
-- Method return types
+- Method parameter and return types
 - Types used in method bodies
 - Template parameter types
-- Nested type references
+- Nested type references (e.g., std::vector<int> → both "std" and "vector" and "int")
 
-Output format: A JSON array of unique type names, one per line. Only output the JSON array, nothing else.
+Exclude:
+- Built-in primitive types (int, char, bool, float, double, void, etc.)
+- CV-qualifiers (const, volatile) and storage specifiers (static, extern)
+- Pointer/reference symbols (*, &)
 
-Example:
+Output Requirements:
+- Output ONLY a JSON array of unique type names
+- One type per line for readability
+- Alphabetically sorted
+- No explanations or additional text
+
+Example Input:
+class Player : public GameObject {
+    HealthComponent* _health;
+    std::vector<Item*> _inventory;
+    
+    void TakeDamage(DamageInfo damage);
+    Transform GetTransform();
+};
+
+Example Output:
 [
-  "BaseClass",
-  "MemberType",
-  "ParameterType",
-  "ReturnType"
+  "DamageInfo",
+  "GameObject",
+  "HealthComponent",
+  "Item",
+  "Transform",
+  "vector"
 ]
 """
         self._last_analysis_prompt = prompt
