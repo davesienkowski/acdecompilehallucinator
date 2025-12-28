@@ -172,7 +172,7 @@ class ClaudeCodeEngine(LLMEngine):
 
             # Cache the response
             if self.cache and response:
-                self.cache.store(prompt, response)
+                self.cache.set(prompt, response)
 
             logger.debug(f"Generated {len(response)} characters")
             return response

@@ -474,7 +474,11 @@ class DatabaseHandler:
             if row:
                 result = dict(row)
                 if result.get('dependencies'):
-                    result['dependencies'] = json.loads(result['dependencies'])
+                    try:
+                        result['dependencies'] = json.loads(result['dependencies'])
+                    except json.JSONDecodeError:
+                        # Legacy format: comma-separated string
+                        result['dependencies'] = [d.strip() for d in result['dependencies'].split(',') if d.strip()]
                 return result
             return None
 
@@ -606,7 +610,11 @@ class DatabaseHandler:
             if row:
                 result = dict(row)
                 if result.get('dependencies'):
-                    result['dependencies'] = json.loads(result['dependencies'])
+                    try:
+                        result['dependencies'] = json.loads(result['dependencies'])
+                    except json.JSONDecodeError:
+                        # Legacy format: comma-separated string
+                        result['dependencies'] = [d.strip() for d in result['dependencies'].split(',') if d.strip()]
                 return result
             return None
 
