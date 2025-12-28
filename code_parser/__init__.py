@@ -15,10 +15,12 @@ from .class_assembler import ClassAssembler
 from .constants_parser import ConstantsParser
 from .constant_replacer import ConstantReplacer
 from .llm_cache import LLMCache
+from .llm_client import LLMClient
+from .llm_processor import LLMProcessor
 
 __all__ = [
     'HeaderParser', 'TypeWriter', 'Struct', 'Enum', 'Method',
-    'DatabaseHandler', 'DependencyAnalyzer', 'ClassHeaderGenerator', 
+    'DatabaseHandler', 'DependencyAnalyzer', 'ClassHeaderGenerator',
     'FunctionProcessor', 'ClassAssembler', 'ConstantsParser',
-    'ConstantReplacer', 'LLMCache'
+    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor'
 ]
