@@ -146,10 +146,22 @@ Options:
   --output PATH          Output directory (default: ./output)
   --engine ENGINE        LLM engine: claude-code, lm-studio (default: lm-studio)
   --class NAME           Process single class only
+  --parallel N           Parallel workers (1=sequential, >1=parallel by dependency level)
   --debug                Enable debug output
   --dry-run              Show plan without processing
   --force                Reprocess even if already done
   --verbose              Verbose logging
+  --no-skills            Disable skill-based prompt enhancement
+```
+
+### Parallel Processing
+
+Types are grouped by dependency level. Types at the same level have no inter-dependencies
+and can be processed concurrently:
+
+```bash
+# Process with 4 parallel workers
+python llm_process.py --engine claude-code --parallel 4
 ```
 
 ### process.py

@@ -21,6 +21,8 @@ import argparse
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 from tqdm import tqdm
@@ -89,6 +91,24 @@ def split_namespace(full_name: str) -> tuple[Optional[str], str]:
 
 
 # ────────────────────────────────────────────────────────────────────────────────
+# Processing Result
+# ────────────────────────────────────────────────────────────────────────────────
+@dataclass
+class ProcessingResult:
+    """Result of processing a single type (enum or struct).
+
+    Used for tracking results in parallel processing.
+    """
+    type_name: str
+    kind: str  # "enum" or "struct"
+    success: bool
+    header_path: Optional[Path] = None
+    source_path: Optional[Path] = None
+    method_count: int = 0
+    error: Optional[str] = None
+
+
+# ────────────────────────────────────────────────────────────────────────────────
 # Main Processor
 # ────────────────────────────────────────────────────────────────────────────────
 class LLMProcessor:
@@ -106,7 +126,8 @@ class LLMProcessor:
                  engine: Optional[LLMEngine] = None,
                  engine_name: str = DEFAULT_ENGINE,
                  engine_config: Optional[EngineConfig] = None,
-                 use_skills: bool = True):
+                 use_skills: bool = True,
+                 max_workers: int = 1):
         """
         Initialize the processor.
 
@@ -120,6 +141,7 @@ class LLMProcessor:
             engine_name: Name of engine to use if no engine provided
             engine_config: Configuration for engine if no engine provided
             use_skills: Whether to use skill-based prompt enhancement (default True)
+            max_workers: Number of parallel workers (1=sequential, >1=parallel)
         """
         self.db = DatabaseHandler(str(db_path))
         self.output_dir = Path(output_dir)
@@ -127,6 +149,7 @@ class LLMProcessor:
         self.dry_run = dry_run
         self.force = force
         self.use_skills = use_skills
+        self.max_workers = max_workers
         self.processed_owners = set()
 
         # Initialize cache (separate database)
@@ -657,16 +680,22 @@ class LLMProcessor:
         return stats
     
     def process_all(self, filter_classes: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Process all types in dependency order"""
+        """Process all types in dependency order.
+
+        Routes to parallel or sequential processing based on max_workers setting.
+        """
         # Note: We don't support force for process_all to prevent accidental mass deletion
         # unless filter_classes is provided
-        
         if self.force and not filter_classes:
             logger.warning("Force flag ignored for bulk processing (safety check)")
             self.force = False
-            
-        stats = self.process_all_internal(filter_classes)
-        return stats
+
+        # Choose processing mode based on max_workers
+        if self.max_workers > 1:
+            logger.info(f"Using parallel processing with {self.max_workers} workers")
+            return self.process_all_parallel(filter_classes)
+        else:
+            return self.process_all_internal(filter_classes)
     
     def show_plan(self):
         """Show what would be processed (dry-run mode)"""
@@ -695,8 +724,141 @@ class LLMProcessor:
         
         if len(order) > 20:
             print(f"... and {len(order) - 20} more types")
-        
+
         print('='*60 + "\n")
+
+    def process_type(self, type_name: str, kind: str) -> ProcessingResult:
+        """Process a single type (enum or struct) and return a result.
+
+        Thread-safe wrapper for process_enum/process_struct for use in
+        parallel processing. Does not update progress bar (handled by caller).
+
+        Args:
+            type_name: Name of the type to process
+            kind: "enum" or "struct"
+
+        Returns:
+            ProcessingResult with success status and output paths
+        """
+        try:
+            if kind == "enum":
+                path = self.process_enum(type_name, pbar=None)
+                return ProcessingResult(
+                    type_name=type_name,
+                    kind="enum",
+                    success=path is not None,
+                    header_path=path
+                )
+            else:
+                result = self.process_struct(type_name, pbar=None)
+                return ProcessingResult(
+                    type_name=type_name,
+                    kind="struct",
+                    success=result.get("header_path") is not None,
+                    header_path=result.get("header_path"),
+                    source_path=result.get("source_path"),
+                    method_count=result.get("method_count", 0)
+                )
+        except Exception as e:
+            logger.error(f"Error processing {type_name}: {e}")
+            return ProcessingResult(
+                type_name=type_name,
+                kind=kind,
+                success=False,
+                error=str(e)
+            )
+
+    def process_all_parallel(self, filter_classes: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Process all types using parallel execution by dependency level.
+
+        Types at the same dependency level have no inter-dependencies and can
+        be processed concurrently. Level N is only started after level N-1
+        completes, ensuring all dependencies are satisfied.
+
+        Args:
+            filter_classes: Optional list of class names to process (skip others)
+
+        Returns:
+            Summary statistics
+        """
+        # Build dependency graph and get levels
+        self.analyzer.build_dependency_graph()
+        levels = self.analyzer.get_dependency_levels()
+
+        if not levels:
+            logger.info("No types to process.")
+            return {"total": 0, "enums_processed": 0, "structs_processed": 0,
+                    "methods_processed": 0, "errors": []}
+
+        # Calculate totals
+        all_types = []
+        for level_types in levels.values():
+            all_types.extend(level_types)
+
+        # Apply filter if requested
+        if filter_classes:
+            filter_set = set(filter_classes)
+            levels = {
+                lvl: [(name, kind) for name, kind in types if name in filter_set]
+                for lvl, types in levels.items()
+            }
+            # Remove empty levels
+            levels = {lvl: types for lvl, types in levels.items() if types}
+
+        total_types = sum(len(types) for types in levels.values())
+
+        stats = {
+            "total": total_types,
+            "enums_processed": 0,
+            "structs_processed": 0,
+            "methods_processed": 0,
+            "errors": []
+        }
+
+        if total_types == 0:
+            logger.info("Nothing to process.")
+            return stats
+
+        logger.info(f"Processing {total_types} types across {len(levels)} levels "
+                    f"with {self.max_workers} workers...")
+
+        # Process each level in order
+        with tqdm(total=total_types, desc="Processing", unit="type") as pbar:
+            for level in sorted(levels.keys()):
+                level_types = levels[level]
+                if not level_types:
+                    continue
+
+                logger.info(f"Level {level}: {len(level_types)} types")
+
+                # Process all types in this level in parallel
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    # Submit all tasks for this level
+                    futures = {
+                        executor.submit(self.process_type, name, kind): (name, kind)
+                        for name, kind in level_types
+                    }
+
+                    # Collect results as they complete
+                    for future in as_completed(futures):
+                        name, kind = futures[future]
+                        result = future.result()
+
+                        if result.success:
+                            if result.kind == "enum":
+                                stats["enums_processed"] += 1
+                            else:
+                                stats["structs_processed"] += 1
+                                stats["methods_processed"] += result.method_count
+                        else:
+                            stats["errors"].append({
+                                "name": result.type_name,
+                                "error": result.error or "Unknown error"
+                            })
+
+                        pbar.update(1)
+
+        return stats
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -719,6 +881,9 @@ Examples:
 
     # Process single class with debug output
     python llm_process.py --class AllegianceProfile --debug
+
+    # Parallel processing with 4 workers (types at same dependency level run concurrently)
+    python llm_process.py --engine claude-code --parallel 4
 
     # Show processing plan (dry-run)
     python llm_process.py --dry-run
@@ -755,6 +920,8 @@ Engine details:
         help="Enable verbose logging")
     parser.add_argument("--no-skills", action="store_true",
         help="Disable skill-based prompt enhancement (use raw few-shot prompts)")
+    parser.add_argument("--parallel", type=int, default=1, metavar="N",
+        help="Number of parallel workers (default: 1=sequential, >1=parallel by dependency level)")
 
     args = parser.parse_args()
     
@@ -803,7 +970,8 @@ Engine details:
         force=args.force,
         engine_name=args.engine,
         engine_config=engine_config,
-        use_skills=not args.no_skills
+        use_skills=not args.no_skills,
+        max_workers=args.parallel
     )
     
     # Handle modes

@@ -398,6 +398,99 @@ class DependencyAnalyzer:
         
         return result
     
+    def get_dependency_levels(self) -> Dict[int, List[Tuple[str, str]]]:
+        """Group types by their dependency depth level.
+
+        Types at the same level have no inter-dependencies and can be
+        processed in parallel. Level 0 contains types with no dependencies,
+        level N contains types whose dependencies are all at levels < N.
+
+        This enables parallel processing where:
+        - All types at level 0 are processed in parallel
+        - Wait for level 0 to complete
+        - All types at level 1 are processed in parallel
+        - And so on...
+
+        Returns:
+            Dictionary mapping level number to list of (type_name, type_kind)
+            tuples at that level. Levels are 0-indexed.
+
+        Example:
+            {
+                0: [("BaseClass", "struct"), ("Interface", "struct")],
+                1: [("Player", "struct"), ("Enemy", "struct")],
+                2: [("PlayerModule", "struct")],
+            }
+        """
+        if not self.dependencies:
+            self.build_dependency_graph()
+
+        # Compute level for each type
+        type_levels: Dict[str, int] = {}
+
+        # Types with no dependencies are level 0
+        for type_name in self.dependencies:
+            deps = self.dependencies[type_name]
+            # Filter to only include deps that are in our dependency graph
+            valid_deps = deps & set(self.dependencies.keys())
+            if not valid_deps:
+                type_levels[type_name] = 0
+
+        # Iteratively compute levels for remaining types
+        # Level = max(dependency levels) + 1
+        max_iterations = len(self.dependencies) + 1
+        for _ in range(max_iterations):
+            changed = False
+            for type_name in self.dependencies:
+                if type_name in type_levels:
+                    continue
+
+                deps = self.dependencies[type_name]
+                valid_deps = deps & set(self.dependencies.keys())
+
+                # Check if all dependencies have levels assigned
+                if all(d in type_levels for d in valid_deps):
+                    if valid_deps:
+                        max_dep_level = max(type_levels[d] for d in valid_deps)
+                        type_levels[type_name] = max_dep_level + 1
+                    else:
+                        type_levels[type_name] = 0
+                    changed = True
+
+            if not changed:
+                break
+
+        # Handle any remaining types (circular dependencies, etc.)
+        # Place them at max_level + 1
+        if type_levels:
+            max_level = max(type_levels.values())
+        else:
+            max_level = -1
+
+        for type_name in self.dependencies:
+            if type_name not in type_levels:
+                type_levels[type_name] = max_level + 1
+                logger.debug(f"Type {type_name} placed at overflow level {max_level + 1}")
+
+        # Group by level with type kind
+        levels: Dict[int, List[Tuple[str, str]]] = {}
+        for type_name, level in type_levels.items():
+            if level not in levels:
+                levels[level] = []
+            kind = self.type_nodes[type_name].kind if type_name in self.type_nodes else "unknown"
+            levels[level].append((type_name, kind))
+
+        # Sort types within each level for deterministic output
+        for level in levels:
+            levels[level].sort(key=lambda x: x[0])
+
+        logger.info(
+            f"Dependency levels: {len(levels)} levels, "
+            f"types per level: {[len(levels[l]) for l in sorted(levels.keys())]}"
+        )
+
+        return levels
+
     def get_type_dependencies(self, type_name: str) -> Set[str]:
         """Get the direct dependencies of a specific type.
 
@@ -410,7 +503,7 @@ class DependencyAnalyzer:
         """
         if not self.dependencies:
             self.build_dependency_graph()
-        
+
         return self.dependencies.get(type_name, set())
     
     def get_dependency_stats(self) -> Dict[str, any]:
