@@ -6,6 +6,7 @@
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Primary key |
+| kind | TEXT | Type kind (struct, enum, typedef) |
 | name | TEXT | Type name |
 | code | TEXT | Raw decompiled code |
 | namespace | TEXT | Namespace (e.g., "Turbine") |

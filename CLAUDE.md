@@ -1,200 +1,170 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with this repository.
+C++ code modernization pipeline for Asheron's Call client decompilation.
 
-## Project Overview
+## Quick Start
 
-A C++ code modernization pipeline that transforms raw decompiled Asheron's Call client code (`acclient.c` / `acclient.h`) into clean, modern C++17+ code.
+```bash
+# Parse decompiled files into database
+python process.py parse --header acclient/acclient.h --source acclient/acclient.c
 
-## Architecture: Hybrid Approach
+# Process with Claude Code engine (recommended)
+python llm_process.py --engine claude-code --class AC1ClientChatManager
 
-This project uses a **hybrid architecture** with backwards-compatible engine abstraction:
+# Process with LM Studio (requires local server at localhost:1234)
+python llm_process.py --engine lm-studio
 
+# Check progress
+python process.py stats
 ```
-python llm_process.py --engine <lm-studio|claude-code> [options]
-```
-
-### Key Decisions
-
-| Decision | Choice |
-|----------|--------|
-| Backwards compatibility | LM Studio continues to work unchanged |
-| Engine selection | CLI flag `--engine` |
-| Legacy improvements | Comprehensive refactoring (types, docs, errors) |
-| Extensibility | Plugin architecture for future LLM backends |
-| Refactoring approach | In-place updates preserving git history |
-
-### Engine Abstraction
-
-```
-engines/
-├── __init__.py       # Exports and factory
-├── base.py           # Abstract LLMEngine interface
-├── lm_studio.py      # Local LM Studio backend
-├── claude_code.py    # Claude Code CLI/skills backend
-└── registry.py       # Plugin discovery
-```
-
-Both engines share:
-- `types.db` for parsed code and state tracking
-- `output/` directory structure
-- Same verification and quality standards
 
 ## Project Structure
 
 ```
 .
-├── acclient/               # Decompiled source files (gitignored)
-│   ├── acclient.c          # Method implementations
-│   └── acclient.h          # Structs, enums, typedefs
-├── code_parser/            # Python parsing modules (18 files)
-│   ├── header_parser.py    # Parses acclient.h
-│   ├── source_parser.py    # Parses acclient.c
-│   ├── db_handler.py       # SQLite operations
-│   └── ...
-├── engines/                # LLM backend abstraction (to be created)
-├── skills/                 # Claude Code skills (to be created)
-├── output/                 # Generated modern C++ (gitignored)
 ├── process.py              # Preprocessing CLI
-├── llm_process.py          # LLM orchestration
-├── HYBRID_MIGRATION_PLAN.md # Detailed implementation plan
-└── CLAUDE.md               # This file
+├── llm_process.py          # LLM orchestration (multi-engine)
+├── code_parser/
+│   ├── llm_processor.py    # Main orchestrator
+│   ├── header_parser.py    # Parse acclient.h
+│   ├── source_parser.py    # Parse acclient.c
+│   ├── db_handler.py       # SQLite operations
+│   ├── dependency_analyzer.py  # Topological sort
+│   ├── class_header_generator.py
+│   ├── function_processor.py
+│   ├── class_assembler.py
+│   ├── type_resolver.py    # Programmatic type extraction
+│   └── exceptions.py       # Exception hierarchy
+├── engines/
+│   ├── __init__.py         # Public API exports
+│   ├── base.py             # Abstract LLMEngine interface
+│   ├── lm_studio.py        # LM Studio OpenAI-compatible backend
+│   ├── claude_code.py      # Claude Code CLI with skills
+│   └── registry.py         # Engine discovery and registration
+├── .claude/
+│   ├── rules/              # Modular instructions
+│   │   ├── python-style.md
+│   │   ├── cpp-output.md
+│   │   ├── workflow.md
+│   │   └── database.md
+│   ├── skills/             # Claude Code skills
+│   │   ├── analyze-deps/
+│   │   ├── modernize-class/
+│   │   ├── modernize-method/
+│   │   ├── process-batch/
+│   │   └── verify-logic/
+│   └── settings.json       # Project permissions
+└── output/                 # Generated C++ code
+    ├── include/{Namespace}/{Class}.h
+    └── src/{Namespace}/{Class}.cpp
 ```
 
-## Quick Commands
+## Engine Architecture
 
-### Preprocessing (Python)
+The project supports multiple LLM backends via a pluggable engine system:
+
 ```bash
-# Parse decompiled files into SQLite database
-python process.py parse --header acclient/acclient.h --source acclient/acclient.c
+# Claude Code (uses skills from .claude/skills/)
+python llm_process.py --engine claude-code --class PlayerModule
 
-# Show database statistics
-python process.py stats
-
-# List all classes with method counts
-python process.py list-classes
+# LM Studio (local LLM via OpenAI-compatible API)
+python llm_process.py --engine lm-studio --lm-studio-url http://localhost:1234/v1
 ```
 
-### Processing (after engine implementation)
-```bash
-# Process with LM Studio (legacy, default)
-python llm_process.py --engine lm-studio
+### Available Engines
 
-# Process with Claude Code
-python llm_process.py --engine claude-code
+| Engine | Description | Requirements |
+|--------|-------------|--------------|
+| `claude-code` | Claude Code CLI with skills integration | `claude` CLI installed |
+| `lm-studio` | Local LLM via OpenAI-compatible API | LM Studio running |
 
-# Process specific class
-python llm_process.py --engine claude-code --class Player
-```
+### Claude Code Skills
 
-## Modernization Rules
+Skills provide structured prompts for specific modernization tasks:
 
-When generating modern C++ code:
+| Skill | Purpose |
+|-------|---------|
+| `modernize-class` | Transform decompiled classes to modern C++ headers |
+| `modernize-method` | Modernize individual functions to C++17+ |
+| `analyze-deps` | Analyze class dependencies |
+| `verify-logic` | Verify semantic equivalence |
+| `process-batch` | Batch processing orchestration |
 
-### Header Generation
-- Use `#pragma once` instead of include guards
-- Convert `struct __cppobj` to `class` with proper access specifiers
-- Preserve inheritance and member order
-- Add minimal includes, prefer forward declarations
-- Do NOT inline function definitions
-- Do NOT rename classes or methods
+## Migration Status (Complete)
 
-### Method Modernization
-- Remove decompiler artifacts (`__thiscall`, `__cdecl`, explicit `this` pointer)
-- Use modern types (`uint32_t`, `bool` instead of `int` for flags)
-- Rename local variables for readability (but not parameters)
-- Add comments explaining logic
-- Preserve ALL original logic - no additions or removals
-- Use enum names instead of magic values where known
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Engine Abstraction | Complete |
+| 1 | Engine Tracking | Complete |
+| 2 | Type Hints & TypeResolver | Complete |
+| 3 | Claude Code Skills | Complete |
 
-### Verification
-Every modernized method must preserve original logic:
-- Compare control flow structure
-- Verify arithmetic operations unchanged
-- Check that all side effects are preserved
-- **Allow**: variable renaming, type modernization, style changes
-- **Reject**: logic changes, missing operations, added functionality
+All phases have been implemented and merged. See [HYBRID_MIGRATION_PLAN.md](HYBRID_MIGRATION_PLAN.md) for details.
 
-## Database Schema (types.db)
+## Key Files
+
+- **Input**: `acclient/acclient.h`, `acclient/acclient.c`, `acclient/acclient.txt` (constants)
+- **Database**: `mcp-sources/types.db` (parsed types, methods, processing state)
+- **Cache**: `mcp-sources/llm_cache.db` (LLM response cache)
+
+## Rules Reference
+
+Detailed instructions in `.claude/rules/`:
+- [python-style.md](.claude/rules/python-style.md) - Python conventions
+- [cpp-output.md](.claude/rules/cpp-output.md) - C++ generation rules
+- [workflow.md](.claude/rules/workflow.md) - Processing pipeline
+- [database.md](.claude/rules/database.md) - Database schema
+
+## Database Schema
+
+### Core Tables
 
 ```sql
 -- Parsed types from acclient.h
-types(name, code, namespace, parent, is_template)
+types(id, kind, name, code, namespace, parent, is_template)
 
 -- Parsed methods from acclient.c
-methods(name, definition, parent_class, offset)
+methods(id, name, definition, parent, offset, is_virtual)
 
--- Processing state (shared by all engines)
-processed_types(name, processed_header, engine_used, timestamp)
-processed_methods(name, parent, processed_code, engine_used, confidence)
+-- Processing state
+processed_types(name, processed_header, processed_at, engine_used)
+processed_methods(id, parent, name, processed_code, confidence, engine_used)
 
--- Named constants from acclient.txt
+-- Named constants
 constants(name, value, type)
 ```
 
-## Output Structure
+## CLI Reference
 
-```
-output/
-├── include/           # Generated .h headers
-│   └── {Namespace}/
-│       └── {ClassName}.h
-└── src/               # Generated .cpp sources
-    └── {Namespace}/
-        └── {ClassName}.cpp
-```
+### llm_process.py
 
-## Implementation Phases
+```bash
+python llm_process.py [OPTIONS]
 
-See [HYBRID_MIGRATION_PLAN.md](HYBRID_MIGRATION_PLAN.md) for detailed implementation.
-
-| Phase | Focus | Status |
-|-------|-------|--------|
-| 0 | Engine abstraction layer | Planned |
-| 1 | LM Studio engine extraction | Planned |
-| 2 | Legacy code refactoring | Planned |
-| 3 | Claude Code engine + skills | Planned |
-| 4 | Advanced features | Future |
-
-## Code Quality Standards (for refactoring)
-
-When refactoring the Python codebase:
-
-### Type Hints
-```python
-def get_type_by_name(self, name: str) -> Optional[TypeRecord]:
-    """Retrieve a type record by its fully qualified name."""
+Options:
+  --db PATH              Path to types.db (default: mcp-sources/types.db)
+  --output PATH          Output directory (default: ./output)
+  --engine ENGINE        LLM engine: claude-code, lm-studio (default: lm-studio)
+  --class NAME           Process single class only
+  --debug                Enable debug output
+  --dry-run              Show plan without processing
+  --force                Reprocess even if already done
+  --verbose              Verbose logging
 ```
 
-### Error Handling
-```python
-try:
-    result = self.engine.generate_header(...)
-except EngineError as e:
-    logger.error(f"Failed to generate header: {e}")
-    raise
+### process.py
+
+```bash
+python process.py COMMAND [OPTIONS]
+
+Commands:
+  parse      Parse acclient.h/c into database
+  stats      Show database statistics
+  list-classes  List all classes with method counts
 ```
 
-### Logging
-```python
-import logging
-logger = logging.getLogger(__name__)
+## Commit Guidelines
 
-logger.info(f"Processing class: {class_name}")
-logger.debug(f"Class has {len(methods)} methods")
-```
-
-## MCP Integration
-
-### Serena MCP
-For semantic code analysis of the decompiled sources:
-- `find_symbol` - Locate classes, methods, types
-- `get_symbols_overview` - File structure analysis
-- `find_referencing_symbols` - Dependency tracking
-- `create_text_file` - Write modernized output
-
-### claude-mem
-For cross-session state persistence:
-- Track processed classes
-- Store learned patterns
-- Resume interrupted work
+- Conventional commits: `type: description`
+- Types: feat, fix, refactor, docs, test, chore
+- No AI attribution in commit messages
