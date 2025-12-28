@@ -15,9 +15,10 @@ from .class_assembler import ClassAssembler
 from .constants_parser import ConstantsParser
 from .constant_replacer import ConstantReplacer
 from .llm_cache import LLMCache
-from .llm_client import LLMClient
-from .llm_processor import LLMProcessor
 from .type_resolver import TypeResolver
+# NOTE: LLMClient and LLMProcessor have been removed.
+# Use engines.get_engine("lm-studio") or engines.get_engine("claude-code") instead.
+# The LLMProcessor class is now in llm_process.py (CLI entry point).
 from .exceptions import (
     ACDecompileError,
     ParsingError, HeaderParsingError, SourceParsingError,
@@ -38,7 +39,7 @@ __all__ = [
     'HeaderParser', 'TypeWriter', 'Struct', 'Enum', 'Method',
     'DatabaseHandler', 'DependencyAnalyzer', 'ClassHeaderGenerator',
     'FunctionProcessor', 'ClassAssembler', 'ConstantsParser',
-    'ConstantReplacer', 'LLMCache', 'LLMClient', 'LLMProcessor', 'TypeResolver',
+    'ConstantReplacer', 'LLMCache', 'TypeResolver',
     # Exceptions
     'ACDecompileError',
     'ParsingError', 'HeaderParsingError', 'SourceParsingError',
